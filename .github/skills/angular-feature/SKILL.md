@@ -1,18 +1,13 @@
 ---
 name: angular-feature
-description: Implement complete Angular features using the repository's existing version, architecture, design system, state patterns, accessibility standards, API contracts, and tests.
+description: Implement Angular features with repository patterns, accessibility, API contracts, visual states, and tests.
 argument-hint: "[feature or user story]"
 ---
 
 # Angular feature implementation
 
-1. Inspect the current Angular/TypeScript versions, project layout, routing, state, forms, UI library, styles, tests, and API clients.
-2. Define user behavior, permissions, API contract, validation, and all visual states.
-3. Reuse existing components and patterns before adding abstractions.
-4. Keep components focused and templates simple.
-5. Use strict types and narrow external data.
-6. Include accessibility, focus, keyboard, responsive, loading, empty, error, and success behavior.
-7. Add tests at the same level used by nearby features.
-8. Run configured lint, tests, type checks, and build.
-
-Use [the feature checklist](./templates/feature-checklist.md).
+1. Inspect the Angular/TypeScript versions and existing routing, state, forms, UI, tests, and API patterns.
+2. Complete [the feature checklist](./templates/feature-checklist.md) for behavior, permissions, contracts, validation, and visual states.
+3. Reuse existing components and keep components focused, templates simple, and external data strictly narrowed.
+4. Implement accessibility, focus/keyboard, responsive, loading, empty, error, and success behavior.
+5. Add nearby-style tests and run configured lint, types, tests, and build.

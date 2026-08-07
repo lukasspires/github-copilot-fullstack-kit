@@ -1,16 +1,13 @@
 ---
 name: quality-gate
-description: Validate a cross-stack change before merge by checking correctness, security, tests, formatting, builds, API compatibility, data migrations, observability, and rollback readiness.
+description: Review changes for correctness, security, tests, compatibility, data integrity, and operational readiness.
 argument-hint: "[diff, branch, or feature]"
 ---
 
 # Quality gate
 
-1. Inspect the diff and identify affected runtimes and contracts.
-2. Run only repository-supported checks.
-3. Review correctness, security, data integrity, idempotency, bounded resource usage, compatibility, and operational behavior.
-4. Verify tests cover changed behavior and failure paths.
-5. Check generated files, migrations, API specs, configuration, secrets, logs, and deployment impact.
-6. Report verified failures separately from unexecuted checks and assumptions.
-
-Use [the review checklist](./templates/review-checklist.md).
+1. Inspect the diff, affected runtimes/contracts, and [the review checklist](./templates/review-checklist.md).
+2. Run only repository-supported, non-mutating checks.
+3. Review correctness, security, data integrity/idempotency, resource bounds, compatibility, tests, and operations.
+4. Check generated files, migrations, API specs, configuration, secrets/logs, deployment, and rollback.
+5. Separate verified failures from questions, assumptions, residual risks, and unexecuted checks.

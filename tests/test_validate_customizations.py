@@ -249,13 +249,82 @@ class ValidatorTestCase(unittest.TestCase):
     def test_task_coordinator_requires_delegation_contract(self) -> None:
         self.write(
             ".github/agents/task-coordinator.agent.md",
-            agent_document("task-coordinator", tools='["read", "search"]'),
+            agent_document("Renamed coordinator", tools='["read", "search"]'),
         )
 
         codes = self.codes()
 
         self.assertIn("POL004", codes)
         self.assertIn("POL005", codes)
+
+    def test_estimated_tokens_uses_rounded_up_utf8_bytes(self) -> None:
+        self.assertEqual(1, validator._estimated_tokens("abcd"))
+        self.assertEqual(2, validator._estimated_tokens("abcde"))
+        self.assertEqual(1, validator._estimated_tokens("é"))
+        self.assertEqual(2, validator._estimated_tokens("ééé"))
+
+    def test_context_budget_warns_only_above_the_limit(self) -> None:
+        budget = validator.TOKEN_BUDGET_OVERRIDES["AGENTS.md"]
+        self.write("AGENTS.md", "x" * (budget * 4))
+
+        self.assertNotIn("TOK001", self.codes())
+
+        self.write("AGENTS.md", "x" * (budget * 4 + 1))
+        warning = next(item for item in self.diagnostics() if item.code == "TOK001")
+        strict = next(
+            item for item in self.diagnostics(strict=True) if item.code == "TOK001"
+        )
+
+        self.assertEqual(validator.Severity.WARNING, warning.severity)
+        self.assertEqual(validator.Severity.ERROR, strict.severity)
+        self.assertIn("301", warning.message)
+
+    def test_context_budget_applies_to_new_agents(self) -> None:
+        budget = validator.TOKEN_BUDGETS["agent"]
+        self.write(
+            ".github/agents/large.agent.md",
+            agent_document("large", body="x" * (budget * 4)),
+        )
+
+        warning = next(item for item in self.diagnostics() if item.code == "TOK001")
+
+        self.assertEqual(".github/agents/large.agent.md", warning.path)
+
+    def test_context_budget_excludes_docs_and_skill_resources(self) -> None:
+        large = "x" * 5000
+        self.write("README.md", large)
+        self.write("docs/guide.md", large)
+        self.write(".github/skills/example/templates/large.md", large)
+        self.write(".github/skills/example/references/large.md", large)
+
+        self.assertNotIn("TOK001", self.codes())
+
+    def test_strict_cli_rejects_context_budget_warning(self) -> None:
+        budget = validator.TOKEN_BUDGET_OVERRIDES["AGENTS.md"]
+        self.write("AGENTS.md", "x" * (budget * 4 + 1))
+        normal = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--root", str(self.root)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        strict = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--root",
+                str(self.root),
+                "--strict",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, normal.returncode)
+        self.assertIn("TOK001 WARNING AGENTS.md:1", normal.stdout)
+        self.assertEqual(1, strict.returncode)
+        self.assertIn("TOK001 ERROR AGENTS.md:1", strict.stdout)
 
     def test_strict_promotes_delegation_policy_warning(self) -> None:
         self.write(

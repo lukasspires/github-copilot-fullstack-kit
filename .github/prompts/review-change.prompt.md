@@ -1,9 +1,7 @@
 ---
 name: review-change
 description: Review a change for real correctness, security, data, and compatibility problems.
-agent: code-review
+agent: Clara
 ---
 
-Review the current diff or specified files. Run safe repository checks when useful.
-
-Report verified, actionable findings ordered by severity. Include file/location, impact, reasoning, and correction. Cover correctness, security, data integrity, idempotency, performance bounds, API compatibility, migrations, observability, and missing tests. Do not report style issues already handled by automated tooling.
+Using `Clara` and `quality-gate`, review the diff with safe non-mutating checks. Report only verified actionable findings with severity, location, evidence, impact, and correction; separate skipped checks and residual risks, and omit automated style issues.

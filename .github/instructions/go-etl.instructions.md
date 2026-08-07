@@ -4,13 +4,8 @@ applyTo: "**/*.go,**/go.mod,**/go.sum"
 
 # Go ETL instructions
 
-- Respect the Go version and module dependencies declared in `go.mod`.
-- Keep packages cohesive and interfaces consumer-owned.
-- Pass `context.Context` through I/O boundaries and honor cancellation and deadlines.
-- Wrap errors with operational context while preserving errors for `errors.Is` and `errors.As`.
-- Close response bodies, rows, files, and other resources deterministically.
-- Bound concurrency with worker pools, semaphores, or rate limiters; avoid unbounded goroutines.
-- Prefer streaming decoders and buffered I/O for large payloads.
-- Keep transformation functions deterministic and table-test them.
-- Run `gofmt` on changed Go files and use the repository's configured lint/test commands.
-- Avoid package-level mutable state unless it is deliberately synchronized and justified.
+- Respect the `go.mod` version/dependencies; keep packages cohesive and interfaces consumer-owned.
+- Propagate `context.Context` across I/O, honor cancellation/deadlines, close resources, and wrap errors while preserving `errors.Is`/`errors.As`.
+- Bound goroutines, queues, retries, and memory; use worker pools/rate limits plus streaming or buffered I/O for large payloads.
+- Keep transformations deterministic and table-tested; avoid mutable package state unless synchronized and justified.
+- Run `gofmt` and the repository's configured test and quality commands.

@@ -1,19 +1,8 @@
 ---
 name: plan-change
 description: Inspect the repository and create a risk-aware implementation plan.
-agent: solution-architect
+agent: Sofia
 tools: ["read", "search"]
 ---
 
-Analyze the requested change using the repository as the source of truth.
-
-Produce:
-
-1. Goal and assumptions.
-2. Current architecture involved.
-3. Files/modules/contracts likely affected.
-4. Sequenced implementation plan.
-5. Tests and verification commands.
-6. Security, compatibility, migration, rollout, and rollback risks.
-
-Do not edit files.
+Using `Sofia` in read-only mode, report the goal/assumptions, relevant architecture, affected files/contracts, sequenced plan, verification commands, and security, compatibility, migration, rollout, and rollback risks. Mark unknowns; do not edit.

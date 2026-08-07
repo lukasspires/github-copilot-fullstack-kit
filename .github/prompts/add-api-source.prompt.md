@@ -1,9 +1,7 @@
 ---
 name: add-api-source
 description: Add a paginated, rate-limited, observable API source to an ETL.
-agent: task-coordinator
+agent: Marina
 ---
 
-Route this API-ingestion task through `task-coordinator`. Have it inspect the repository, classify the risk, and delegate sequentially to `etl-python` or `etl-go` according to the existing implementation.
-
-Verify authentication, base URL/configuration, pagination, cursor or incremental strategy, rate limits, timeout policy, retryable status codes, schema validation, deduplication key, checkpoint persistence, and secret handling. Add contract fixtures and tests without live network calls. Document operational metrics and failure behavior.
+Have `Marina` route this API-ingestion task to `Paula` or `Gabriel`. Require auth/config, pagination/cursor, rate and timeout bounds, transient-only retries, schema validation, idempotency/checkpoints, protected secrets, operational metrics, and offline contract tests.

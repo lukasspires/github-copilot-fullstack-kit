@@ -1,9 +1,7 @@
 ---
 name: add-web-scraper
 description: Add an authorized, resilient, rate-limited web scraper.
-agent: task-coordinator
+agent: Marina
 ---
 
-Route this scraping task through `task-coordinator`. Have it inspect the repository, classify the risk, and delegate sequentially to `etl-python` or `etl-go` according to the existing implementation.
-
-Confirm the target is public or authorized. Do not bypass authentication, CAPTCHA, anti-bot controls, robots restrictions, rate limits, or terms of service. Prefer a documented API when available. Use stable selectors, explicit timeouts, conservative request rates, backoff, checkpoints, content validation, fixture-based parser tests, and clear handling for layout changes.
+Have `Marina` route this public/authorized scraping task to `Paula` or `Gabriel`. Prefer an API and never bypass access controls. Require stable extraction, conservative rate/time bounds, checkpoints, content/layout validation, and offline parser fixtures.

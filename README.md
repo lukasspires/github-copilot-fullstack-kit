@@ -36,6 +36,16 @@ scripts/validate_customizations.py  # Standard-library structural validation
 
 Avoid duplicating the same long rules in every layer. Global rules belong in repository instructions; detailed procedures belong in skills.
 
+## Token-efficient defaults
+
+- Keep repository-wide instructions cross-cutting; put stack rules in matching path instructions and detailed workflows in on-demand skills.
+- Select a focused specialist directly for a narrow task. Use `Marina` for unclassified, cross-stack, or multi-specialist work.
+- Give `Marina` the outcome, acceptance criteria, constraints, affected areas, and expected checks. Reference repository paths instead of pasting available files or long logs.
+- Use a connector skill alone for connector-only work; add `etl-pipeline` only for multi-stage contracts, orchestration, replay, or recovery.
+- Prompt files remain compact legacy adapters and add context only when invoked.
+
+The validator uses a deterministic UTF-8-bytes/4 proxy to detect context growth; it is a regression metric, not a model tokenizer. Default budgets are 300 for `AGENTS.md`, 650 for repository instructions, 1,000 for `Marina`, 600 for other agents, 350 for path instructions, 250 for prompts, and 500 for each `SKILL.md`. `TOK001` is a warning normally and an error with `--strict`.
+
 ## IDE compatibility as of August 2026
 
 | Feature | VS Code | JetBrains/IntelliJ | Eclipse |
@@ -64,7 +74,7 @@ Prompt files are supported by some VS Code Copilot Chat surfaces but are not use
 ### VS Code
 
 - Open the Command Palette and run `Chat: Open Customizations`.
-- Select `task-coordinator` in the agent picker for unclassified development or data-analysis work. This is the primary Agent Host entry point.
+- Select `Marina` in the agent picker for unclassified development or data-analysis work. This is the primary Agent Host entry point.
 - All implementation specialists remain visible and can be selected directly for narrowly scoped work.
 - Prompts are read from `.github/prompts` only by compatible legacy/extension-host surfaces and can be invoked there with `/prompt-name`; the Agent Host does not use them.
 - Skills are read from `.github/skills` and can load automatically or appear as slash commands.
@@ -86,9 +96,7 @@ Prompt files are supported by some VS Code Copilot Chat surfaces but are not use
 
 ### VS Code Agent Host (primary)
 
-Select `task-coordinator` and describe the required outcome. The coordinator discovers repository context, classifies risk, delegates to the appropriate specialist, tracks verification, and consolidates the result. It does not edit files itself.
-
-Writer agents run sequentially with an explicit authorized write set. Read-only research may run in parallel. Cross-stack work and migrations go to `solution-architect` first, followed by one implementation specialist at a time. If an unexpected external change appears inside a specialist's write set, that specialist stops and returns control to the coordinator instead of overwriting it.
+Select a focused specialist for a bounded single-stack task; otherwise select `Marina`. The read-only coordinator discovers context, sends compact contracts, runs writers sequentially by write set, and consolidates verified evidence. Cross-stack work or migrations go to `Sofia` first. Unexpected changes inside an active write set stop that writer.
 
 ### Legacy prompt workflow
 
@@ -101,15 +109,11 @@ On compatible extension-host surfaces, `/execute-task` remains the legacy entry 
 - `/analyze-data` for reproducible analytical work.
 - `/review-change` for an explicitly requested independent review.
 
-Do not depend on prompt files in the Agent Host. When prompts are unavailable, select `task-coordinator` or the named specialist directly and provide the same task description in chat.
+Do not depend on prompt files in the Agent Host. When prompts are unavailable, select `Marina` or the named specialist directly and provide the same task description in chat.
 
 ### Risk-based review
 
-The coordinator classifies work as low, medium, or high risk. It asks whether to run `code-review` only for high-risk work, immediately before the review gate, and explains the triggering risk. High-risk triggers include authentication or authorization, sensitive data, migrations or backfills, public contracts, cross-stack changes, infrastructure, critical concurrency or idempotency, and required checks that could not be run.
-
-When review is authorized, `code-review` applies the `quality-gate` skill and returns `PASS`, `PASS_WITH_RISKS`, or `FAIL`. A `FAIL` returns to the original writer for correction, for at most two correction/review cycles. When review is declined, the final handoff records the declined review and remaining risk. Low- and medium-risk changes do not prompt for independent review unless the user explicitly requests it.
-
-Pure data analysis is self-validated by `data-analyst`; it does not use a separate reviewer. Any associated code, schema, migration, or production change follows the normal risk policy.
+`Marina` proposes `Clara` only for high-risk development or an explicit review request. Authorized review returns `PASS`, `PASS_WITH_RISKS`, or `FAIL`; failures return to the original writer for at most two correction/review cycles. Declined review and residual risk are recorded. Pure analysis uses `Diana` self-validation; related production or contract changes use the normal policy.
 
 See [the agent workflow](docs/agent-workflow.md) for the delegation contract, routing examples, risk policy, and shared definition of done.
 
@@ -125,7 +129,7 @@ python scripts/validate_customizations.py --root . --installed --strict
 
 Use `--root` to validate another repository root, `--installed` to reject unresolved `AGENTS.md` project-map placeholders, and `--strict` to promote structural warnings to errors. Exit code `0` means success, `1` means a configuration error, and `2` means invalid usage or an internal validation failure.
 
-The script validates the structural subset adopted by this kit, including metadata, references, name collisions, local links, and installed placeholders. It is not a complete GitHub Copilot schema validator and does not replace the Customizations diagnostics in VS Code. Run both after installation or customization.
+The script validates the structural subset adopted by this kit, including metadata, references, name collisions, local links, installed placeholders, and context-size budgets. It is not a complete GitHub Copilot schema validator or a real tokenizer and does not replace the Customizations diagnostics in VS Code. Run both after installation or customization.
 
 When changing the validator itself, run its dependency-free test suite:
 

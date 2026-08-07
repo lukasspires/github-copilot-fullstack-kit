@@ -1,28 +1,22 @@
 ---
 name: etl-pipeline
-description: Design or modify reliable ETL pipelines with explicit contracts, idempotency, checkpoints, observability, validation, replay, and failure handling. Use for any multi-stage data pipeline task.
+description: Design or modify multi-stage ETLs with contracts, idempotency, checkpoints, replay, validation, and observability; not connector-only changes.
 argument-hint: "[pipeline goal or affected module]"
 ---
 
 # Reliable ETL pipeline
 
-Use this skill when creating or changing a pipeline that extracts, transforms, validates, and loads data.
+Use this skill for multi-stage pipeline contracts, orchestration, recovery, or replay. For a connector-only change, use the matching API, file, or scraping skill instead.
 
 ## Workflow
 
-1. Inspect existing pipeline patterns, runtime, scheduler, storage, schemas, checkpoints, and tests.
-2. Define the source and destination contracts using [the pipeline checklist](./templates/pipeline-checklist.md).
-3. Classify failures as transient, permanent, validation, authorization, or configuration errors.
-4. Design idempotency and replay before implementation.
-5. Bound memory, concurrency, retries, pagination, and execution time.
-6. Add structured logs and metrics for each stage.
-7. Add unit tests for transformations and integration/contract tests for adapters.
-8. Document run, recovery, backfill, and rollback procedures.
+1. Inspect runtime, scheduler, storage, schemas, checkpoints, tests, and established pipeline patterns.
+2. Complete [the pipeline checklist](./templates/pipeline-checklist.md), including contracts and failure classes.
+3. Design idempotency, checkpoints, replay, and validation behavior before implementation.
+4. Bound memory, concurrency, retries, pagination, and execution time; add stage logs and metrics.
+5. Test transformations and adapter contracts; document run, recovery, backfill, and rollback.
 
 ## Required outcomes
 
-- No silent record loss.
-- Safe restart after partial failure.
-- Stable deduplication keys.
-- Explicit schema and timezone behavior.
-- Tests that do not depend on live external services.
+- No silent loss; stable keys and safe restart after partial failure.
+- Explicit schema/timezone behavior and offline tests.

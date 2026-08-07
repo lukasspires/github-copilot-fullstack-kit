@@ -5,6 +5,9 @@ The validator intentionally does not implement YAML. Frontmatter is limited to
 top-level fields whose values are either scalars or JSON-compatible inline
 arrays. This keeps the command dependency-free and makes unsupported metadata
 fail explicitly instead of being parsed approximately.
+
+Context budgets use UTF-8 bytes divided by four as a stable regression proxy,
+not as a claim about any model's tokenizer.
 """
 
 from __future__ import annotations
@@ -27,6 +30,17 @@ URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 INSTALLED_PLACEHOLDER = re.compile(r"\[path\s+or\s+N/A\]", re.IGNORECASE)
 BUILTIN_PROMPT_AGENTS = frozenset(("ask", "agent", "plan"))
+TOKEN_BUDGETS = {
+    "agent": 600,
+    "instruction": 350,
+    "prompt": 250,
+    "skill": 500,
+}
+TOKEN_BUDGET_OVERRIDES = {
+    "AGENTS.md": 300,
+    ".github/copilot-instructions.md": 650,
+    ".github/agents/task-coordinator.agent.md": 1000,
+}
 
 
 class Severity(str, Enum):
@@ -298,6 +312,74 @@ def parse_frontmatter(
 
 def _sorted_paths(paths: Iterable[Path]) -> list[Path]:
     return sorted(paths, key=lambda item: (item.as_posix().casefold(), item.as_posix()))
+
+
+def _estimated_tokens(text: str) -> int:
+    """Return a tokenizer-independent regression estimate based on UTF-8 size."""
+
+    return (len(text.encode("utf-8")) + 3) // 4
+
+
+def _context_budget_paths(root: Path) -> list[tuple[Path, int]]:
+    """Return runtime customization artifacts and their estimated-token budgets."""
+
+    github = root / ".github"
+    candidates: dict[Path, int] = {}
+
+    def add(paths: Iterable[Path], budget: int) -> None:
+        for path in paths:
+            if path.is_file():
+                candidates[path] = budget
+
+    agent_dir = github / "agents"
+    add(agent_dir.glob("*.md") if agent_dir.is_dir() else [], TOKEN_BUDGETS["agent"])
+    instruction_dir = github / "instructions"
+    add(
+        instruction_dir.glob("*.instructions.md")
+        if instruction_dir.is_dir()
+        else [],
+        TOKEN_BUDGETS["instruction"],
+    )
+    prompt_dir = github / "prompts"
+    add(
+        prompt_dir.glob("*.prompt.md") if prompt_dir.is_dir() else [],
+        TOKEN_BUDGETS["prompt"],
+    )
+    skill_dir = github / "skills"
+    add(
+        skill_dir.glob("*/SKILL.md") if skill_dir.is_dir() else [],
+        TOKEN_BUDGETS["skill"],
+    )
+
+    for relative_path, budget in TOKEN_BUDGET_OVERRIDES.items():
+        path = root / relative_path
+        if path.is_file():
+            candidates[path] = budget
+
+    return [(path, candidates[path]) for path in _sorted_paths(candidates)]
+
+
+def _validate_token_budgets(root: Path, diagnostics: list[Diagnostic]) -> None:
+    """Warn when runtime context exceeds a deterministic size guardrail."""
+
+    for path, budget in _context_budget_paths(root):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        estimated = _estimated_tokens(text)
+        if estimated > budget:
+            diagnostics.append(
+                _diagnostic(
+                    "TOK001",
+                    Severity.WARNING,
+                    root,
+                    path,
+                    1,
+                    f"estimated context size {estimated} exceeds token budget "
+                    f"{budget} (UTF-8 bytes/4 regression proxy)",
+                )
+            )
 
 
 def _required_string(
@@ -887,7 +969,7 @@ def validate(
                         "an agents whitelist requires the 'agent' tool",
                     )
                 )
-        if document.metadata.get("name") == "task-coordinator":
+        if path.name.casefold() == "task-coordinator.agent.md":
             if not whitelist:
                 diagnostics.append(
                     _diagnostic(
@@ -896,7 +978,7 @@ def validate(
                         root,
                         path,
                         document.field_lines.get("name", 1),
-                        "task-coordinator requires a non-empty agents whitelist",
+                        "task coordinator requires a non-empty agents whitelist",
                     )
                 )
             if tools is None or "agent" not in tools:
@@ -907,7 +989,7 @@ def validate(
                         root,
                         path,
                         document.field_lines.get("tools", 1),
-                        "task-coordinator requires the 'agent' tool",
+                        "task coordinator requires the 'agent' tool",
                     )
                 )
         if tools is not None and "agent" in tools and not whitelist:
@@ -1047,6 +1129,7 @@ def validate(
         )
 
     _validate_links(root, diagnostics)
+    _validate_token_budgets(root, diagnostics)
     if installed:
         _validate_installed(root, diagnostics)
 

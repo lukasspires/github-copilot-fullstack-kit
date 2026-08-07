@@ -1,19 +1,13 @@
 ---
 name: java-rest-api
-description: Implement or modify Java web APIs with stable contracts, validation, authorization, transaction boundaries, persistence, error mapping, observability, migrations, and tests. Use Spring Boot conventions only when present.
+description: Implement Java APIs with stable contracts, validation, authorization, persistence, migrations, observability, and tests.
 argument-hint: "[endpoint or backend behavior]"
 ---
 
 # Java REST API
 
-1. Inspect the Java version, framework, build tool, security, persistence, migration, API documentation, and test conventions.
-2. Define request/response/error contracts and compatibility expectations.
-3. Validate and authorize at the boundary.
-4. Keep controllers thin and business rules in appropriate services/domain objects.
-5. Deliberately define transaction scope; avoid remote calls inside long transactions.
-6. Bound queries and pagination and check for N+1 behavior.
-7. Map internal failures to stable external errors without leaking sensitive details.
-8. Add unit and integration tests and update API documentation/migrations when needed.
-9. Run wrapper-based build and configured quality gates.
-
-Use [the endpoint checklist](./templates/endpoint-checklist.md).
+1. Inspect the actual Java/framework/build, security, persistence, migration, documentation, and test conventions.
+2. Complete [the endpoint checklist](./templates/endpoint-checklist.md) for contracts, compatibility, auth, transactions, queries, and rollout.
+3. Keep controllers thin, validate/authorize at boundaries, and map failures to stable errors without leaking details.
+4. Bound queries/pagination, prevent N+1 behavior, and avoid remote calls inside long transactions.
+5. Add unit/integration tests, update API docs/migrations when needed, and run wrapper-based quality gates.

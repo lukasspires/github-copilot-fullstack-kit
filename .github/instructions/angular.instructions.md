@@ -4,13 +4,9 @@ applyTo: "**/*.ts,**/*.html,**/*.scss,**/angular.json,**/package.json"
 
 # Angular instructions
 
-- Detect the installed Angular and TypeScript versions before selecting APIs or syntax.
-- Follow the repository's current choice of standalone components, NgModules, state management, signals, RxJS patterns, and UI library.
-- Keep components focused on presentation and orchestration; place reusable data access and domain behavior in appropriate services or stores.
-- Use strict typing and avoid `any`; narrow `unknown` values at boundaries.
-- Prevent subscription leaks using the project's established pattern.
-- Treat templates as untrusted display boundaries: avoid unsafe HTML and direct DOM manipulation unless reviewed.
-- Include accessible labels, keyboard support, focus behavior, and semantic markup.
-- Cover loading, empty, validation, error, and success states.
-- Add or update unit tests and, when configured, component or end-to-end tests.
-- Do not change package versions or lockfiles unless dependency changes are required.
+- Detect the installed Angular/TypeScript versions and follow the existing component, state, forms, RxJS, and UI-library patterns.
+- Keep components focused; place reusable data access and domain behavior in services or stores.
+- Use strict types, narrow external `unknown` values, and prevent subscription leaks with the repository's pattern.
+- Treat templates as untrusted display boundaries; avoid unsafe HTML or direct DOM manipulation unless reviewed.
+- Cover accessibility, keyboard/focus behavior, responsive layout, and loading, empty, validation, error, and success states.
+- Update configured unit/component/E2E tests. Change dependencies or lockfiles only when required.
