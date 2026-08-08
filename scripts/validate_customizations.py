@@ -41,6 +41,14 @@ TOKEN_BUDGET_OVERRIDES = {
     ".github/copilot-instructions.md": 650,
     ".github/agents/task-coordinator.agent.md": 1000,
 }
+COORDINATOR_RECEIPT_FIELDS = (
+    "status:",
+    "changed:",
+    "checks:",
+    "evidence:",
+    "risks:",
+    "next:",
+)
 
 
 class Severity(str, Enum):
@@ -990,6 +998,23 @@ def validate(
                         path,
                         document.field_lines.get("tools", 1),
                         "task coordinator requires the 'agent' tool",
+                    )
+                )
+            missing_receipt_fields = tuple(
+                field
+                for field in COORDINATOR_RECEIPT_FIELDS
+                if field not in document.body.casefold()
+            )
+            if missing_receipt_fields:
+                diagnostics.append(
+                    _diagnostic(
+                        "POL006",
+                        Severity.ERROR,
+                        root,
+                        path,
+                        1,
+                        "task coordinator requires compact receipt fields: "
+                        + ", ".join(missing_receipt_fields),
                     )
                 )
         if tools is not None and "agent" in tools and not whitelist:

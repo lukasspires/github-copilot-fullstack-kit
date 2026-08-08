@@ -29,9 +29,18 @@ Assign the highest applicable level:
 
 Send: objective/criteria; context/instructions; assumptions/questions; affected contracts; exact write set; required and prohibited/unavailable checks; risks/dependencies/prior outputs; stop-on-external-change instruction.
 
-Require back: status; changed files/behavior/contracts; commands with exact outcomes and skips/reasons; test/analysis evidence; limitations, remaining work, residual risks, and external changes.
+Require this receipt with no preamble, repeated instructions, unchanged files, or full logs:
 
-Keep handoffs compact: reference paths and summarize evidence instead of pasting available instructions, unchanged files, or full logs.
+```text
+status: DONE | PARTIAL | BLOCKED
+changed: <path - behavior/contract> | none
+checks: <command - PASS|FAIL|SKIP: exact result/reason> | none
+evidence: <focused tests/analysis/artifacts> | none
+risks: <limitations/assumptions/residual risk/external changes> | none
+next: <remaining action> | none
+```
+
+Use additional lines under a field only when evidence requires them.
 
 ## Review policy
 

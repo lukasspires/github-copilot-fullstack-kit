@@ -256,6 +256,25 @@ class ValidatorTestCase(unittest.TestCase):
 
         self.assertIn("POL004", codes)
         self.assertIn("POL005", codes)
+        self.assertIn("POL006", codes)
+
+    def test_task_coordinator_requires_compact_receipt_fields(self) -> None:
+        receipt = "\n".join(validator.COORDINATOR_RECEIPT_FIELDS)
+        self.write(
+            ".github/agents/task-coordinator.agent.md",
+            agent_document(
+                "Renamed coordinator",
+                tools='["read", "agent"]',
+                extra='agents: ["writer"]',
+                body=receipt,
+            ),
+        )
+
+        policy_codes = [
+            item.code for item in self.diagnostics() if item.code.startswith("POL")
+        ]
+
+        self.assertNotIn("POL006", policy_codes)
 
     def test_estimated_tokens_uses_rounded_up_utf8_bytes(self) -> None:
         self.assertEqual(1, validator._estimated_tokens("abcd"))
