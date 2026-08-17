@@ -12,6 +12,7 @@ When agent delegation is unavailable, select the named specialist manually and i
 | `Sofia` | Cross-stack impact analysis, sequencing, migration, rollout, and rollback planning | No |
 | `Alice` | Angular UI, state, accessibility, and frontend tests | Yes |
 | `Bruno` | Java APIs, domain behavior, persistence, security, and tests | Yes |
+| `Gustavo` | Go HTTP/RPC APIs, services, persistence, security, observability, and tests | Yes |
 | `Paula` | Python extraction, transformation, validation, loading, and recovery | Yes |
 | `Gabriel` | Go ingestion and ETL with bounded concurrency and reliable I/O | Yes |
 | `Diana` | SQL, notebooks, metrics, profiling, statistical analysis, and reproducible findings | Yes |
@@ -81,6 +82,7 @@ Pure analytical work is self-validated by `Diana` for source traceability, metri
 |---|---|---|
 | Add an accessible Angular form backed by an API | `Alice` | `angular-feature` |
 | Add a transactional Java endpoint | `Bruno` | `java-rest-api` |
+| Add a Go HTTP or RPC endpoint | `Gustavo` | `/go-endpoint` on compatible Copilot surfaces |
 | Ingest a paginated API in Python | `Paula` | `api-ingestion` and `etl-pipeline` |
 | Modify an existing ETL or its data contract | `Marina` | `/modify-etl`, then `Sofia` and the affected ETL specialist |
 | Compare retention by signup cohort | `Diana` | `data-analysis` |

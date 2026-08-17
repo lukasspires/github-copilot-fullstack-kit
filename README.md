@@ -5,7 +5,7 @@ Starter configuration for repositories containing:
 - Python and Go ETLs
 - Web scraping, API ingestion, and repository/file ingestion
 - Angular frontend
-- Java web backend, including Spring Boot when already used by the project
+- Java and Go web backends, using only frameworks already present in the project
 - Cross-stack architecture and code review
 - Reproducible SQL, notebook, metric, and statistical data analysis
 - Coordinated intake and routing for development or analysis requests
@@ -96,7 +96,7 @@ Prompt files are supported by some VS Code Copilot Chat surfaces but are not use
 ### Codex
 
 - Launch Codex from the repository root so it discovers `AGENTS.md`, `.codex/agents/`, and `.agents/skills/`.
-- Give the main thread an unclassified or cross-stack request and let the coordination rules route specialists. You may also explicitly request `alice`, `bruno`, `paula`, `gabriel`, `diana`, `sofia`, or `clara`.
+- Give the main thread an unclassified or cross-stack request and let the coordination rules route specialists. You may also explicitly request `alice`, `bruno`, `gustavo`, `paula`, `gabriel`, `diana`, `sofia`, or `clara`.
 - Agents inherit the session model and reasoning effort. Read-only roles use a read-only sandbox; implementation roles use workspace write access.
 
 ### Claude Code
@@ -131,6 +131,7 @@ On compatible extension-host surfaces, `/execute-task` remains the legacy entry 
 - `/create-python-etl`, `/create-go-etl`, `/add-api-source`, `/add-web-scraper`, and `/add-file-source` for ingestion work.
 - `/modify-etl` for changing an existing ETL through coordinator-led architecture and implementation routing.
 - `/java-endpoint` for Java endpoint work.
+- `/go-endpoint` for Go HTTP or RPC endpoint work.
 - `/analyze-data` for reproducible analytical work.
 - `/review-change` for an explicitly requested independent review.
 

@@ -593,6 +593,10 @@ class ValidatorTestCase(unittest.TestCase):
         self.assertRegex(first[0].render(), r"^[A-Z]+\d{3} ERROR .+\.md:\d+: .+")
 
 
+    def test_gustavo_is_an_expected_codex_and_claude_writer(self) -> None:
+        self.assertIn("gustavo", validator.EXPECTED_AGENTS)
+        self.assertNotIn("gustavo", validator.READ_ONLY_AGENTS)
+
     def test_valid_codex_and_claude_sets_pass_platform_validation(self) -> None:
         for name in validator.EXPECTED_AGENTS:
             read_only = name in validator.READ_ONLY_AGENTS

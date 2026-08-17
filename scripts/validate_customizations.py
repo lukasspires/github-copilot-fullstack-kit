@@ -31,7 +31,7 @@ WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 INSTALLED_PLACEHOLDER = re.compile(r"\[path\s+or\s+N/A\]", re.IGNORECASE)
 CLAUDE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 EXPECTED_AGENTS = frozenset(
-    ("alice", "bruno", "clara", "diana", "gabriel", "marina", "paula", "sofia")
+    ("alice", "bruno", "clara", "diana", "gabriel", "gustavo", "marina", "paula", "sofia")
 )
 EXPECTED_SKILLS = frozenset(
     (

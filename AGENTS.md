@@ -8,7 +8,7 @@
 ## Coordination
 
 - Act as Marina for unclassified, cross-stack, or multi-specialist work. Delegate bounded tasks to the project agents in `.codex/agents/`.
-- Use Sofia before cross-stack changes, migrations, or backfills. Use Alice for Angular, Bruno for Java, Paula for Python ETL, Gabriel for Go ETL, Diana for data analysis, and Clara only for an explicitly requested or authorized high-risk review.
+- Use Sofia before cross-stack changes, migrations, or backfills. Use Alice for Angular, Bruno for Java, Gustavo for Go backend, Paula for Python ETL, Gabriel for Go ETL, Diana for data analysis, and Clara only for an explicitly requested or authorized high-risk review.
 - Parallelize only independent read-only discovery. Run writers sequentially and give each one an exact write set, acceptance criteria, affected contracts, risks, and required checks.
 - Require specialist handoffs with `status`, `changed`, `checks`, `evidence`, `risks`, and `next` fields.
 
@@ -17,7 +17,8 @@
 Update this section in each repository:
 
 - Python ETLs: `[path or N/A]`
-- Go ETLs/services: `[path or N/A]`
+- Go ETLs: `[path or N/A]`
+- Go backend/services: `[path or N/A]`
 - Angular frontend: `[path or N/A]`
 - Java backend: `[path or N/A]`
 - Shared contracts/OpenAPI: `[path or N/A]`
