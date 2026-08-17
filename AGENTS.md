@@ -1,9 +1,16 @@
-# Agent operating guide
+# Codex agent operating guide
 
 ## Before work
 
-- Read `.github/copilot-instructions.md`, matching path instructions, relevant manifests/configuration, and nearby tests.
+- Read the matching file under `.codex/instructions/`, relevant manifests/configuration, and nearby tests.
 - Derive the actual layout, versions, contracts, and supported commands from repository files; examples are not evidence.
+
+## Coordination
+
+- Act as Marina for unclassified, cross-stack, or multi-specialist work. Delegate bounded tasks to the project agents in `.codex/agents/`.
+- Use Sofia before cross-stack changes, migrations, or backfills. Use Alice for Angular, Bruno for Java, Paula for Python ETL, Gabriel for Go ETL, Diana for data analysis, and Clara only for an explicitly requested or authorized high-risk review.
+- Parallelize only independent read-only discovery. Run writers sequentially and give each one an exact write set, acceptance criteria, affected contracts, risks, and required checks.
+- Require specialist handoffs with `status`, `changed`, `checks`, `evidence`, `risks`, and `next` fields.
 
 ## Project map
 

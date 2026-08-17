@@ -61,6 +61,26 @@ def skill_document(name: str, *, description: str = "Skill description.", body: 
     )
 
 
+def codex_agent_document(name: str, *, sandbox: str) -> str:
+    return (
+        f'name = "{name}"\n'
+        f'description = "Agent {name}."\n'
+        f'sandbox_mode = "{sandbox}"\n'
+        'developer_instructions = """\n'
+        "Never modify files when configured read-only. Follow the task contract.\n"
+        '"""\n'
+    )
+
+
+def claude_agent_document(name: str, *, writer: bool) -> str:
+    tools = '["Read", "Glob", "Grep", "Edit", "Write"]' if writer else '["Read", "Glob", "Grep"]'
+    return agent_document(
+        name,
+        tools=tools,
+        extra="model: inherit\npermissionMode: plan",
+    )
+
+
 class ValidatorTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -296,7 +316,7 @@ class ValidatorTestCase(unittest.TestCase):
 
         self.assertEqual(validator.Severity.WARNING, warning.severity)
         self.assertEqual(validator.Severity.ERROR, strict.severity)
-        self.assertIn("301", warning.message)
+        self.assertIn(str(budget + 1), warning.message)
 
     def test_context_budget_applies_to_new_agents(self) -> None:
         budget = validator.TOKEN_BUDGETS["agent"]
@@ -571,6 +591,65 @@ class ValidatorTestCase(unittest.TestCase):
             [item.path.casefold() for item in first],
         )
         self.assertRegex(first[0].render(), r"^[A-Z]+\d{3} ERROR .+\.md:\d+: .+")
+
+
+    def test_valid_codex_and_claude_sets_pass_platform_validation(self) -> None:
+        for name in validator.EXPECTED_AGENTS:
+            read_only = name in validator.READ_ONLY_AGENTS
+            self.write(
+                f".codex/agents/{name}.toml",
+                codex_agent_document(
+                    name, sandbox="read-only" if read_only else "workspace-write"
+                ),
+            )
+            self.write(
+                f".claude/agents/{name}.md",
+                claude_agent_document(name, writer=not read_only),
+            )
+        for name in validator.EXPECTED_SKILLS:
+            self.write(f".agents/skills/{name}/SKILL.md", skill_document(name))
+            self.write(f".claude/skills/{name}/SKILL.md", skill_document(name))
+
+        platform_codes = {
+            item.code
+            for item in self.diagnostics()
+            if item.code.startswith(("CODEX", "CLAUDE", "TOML"))
+        }
+
+        self.assertEqual(set(), platform_codes)
+
+    def test_codex_rejects_fixed_model_and_wrong_sandbox(self) -> None:
+        for name in validator.EXPECTED_AGENTS:
+            content = codex_agent_document(name, sandbox="workspace-write")
+            if name == "alice":
+                content += 'model = "fixed-model"\n'
+            self.write(f".codex/agents/{name}.toml", content)
+        for name in validator.EXPECTED_SKILLS:
+            self.write(f".agents/skills/{name}/SKILL.md", skill_document(name))
+
+        codes = self.codes()
+
+        self.assertIn("CODEX002", codes)
+        self.assertIn("CODEX003", codes)
+
+    def test_claude_rejects_writer_without_write_tools_and_unknown_skill(self) -> None:
+        for name in validator.EXPECTED_AGENTS:
+            writer = name not in validator.READ_ONLY_AGENTS
+            content = claude_agent_document(name, writer=writer)
+            if name == "alice":
+                content = agent_document(
+                    name,
+                    tools='["Read"]',
+                    extra='model: inherit\npermissionMode: plan\nskills: ["missing"]',
+                )
+            self.write(f".claude/agents/{name}.md", content)
+        for name in validator.EXPECTED_SKILLS:
+            self.write(f".claude/skills/{name}/SKILL.md", skill_document(name))
+
+        codes = self.codes()
+
+        self.assertIn("CLAUDE004", codes)
+        self.assertIn("CLAUDE005", codes)
 
 
 if __name__ == "__main__":

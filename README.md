@@ -1,4 +1,4 @@
-# GitHub Copilot Full-Stack Configuration Kit
+# Copilot, Codex, and Claude Code Full-Stack Configuration Kit
 
 Starter configuration for repositories containing:
 
@@ -9,6 +9,18 @@ Starter configuration for repositories containing:
 - Cross-stack architecture and code review
 - Reproducible SQL, notebook, metric, and statistical data analysis
 - Coordinated intake and routing for development or analysis requests
+
+## Platform sets
+
+The repository keeps three active, independent customization sets side by side:
+
+| Target | Agents | Skills | Rules and entry point |
+|---|---|---|---|
+| GitHub Copilot | `.github/agents/` | `.github/skills/` | `.github/copilot-instructions.md` and `.github/instructions/` |
+| Codex | `.codex/agents/` | `.agents/skills/` | `AGENTS.md` and `.codex/instructions/` |
+| Claude Code | `.claude/agents/` | `.claude/skills/` | `CLAUDE.md` and `.claude/rules/` |
+
+The copies are intentionally independent. Change all affected platform copies when a shared workflow changes, but preserve platform-native metadata, tools, permissions, and orchestration behavior.
 
 ## Structure
 
@@ -33,6 +45,7 @@ scripts/validate_customizations.py  # Standard-library structural validation
 - `*.prompt.md`: legacy reusable commands for compatible Copilot Chat surfaces.
 - `skills/*/SKILL.md`: detailed procedures and related templates loaded when relevant.
 - `AGENTS.md`: repository operational context for compatible agent surfaces.
+- `CLAUDE.md`: imports shared operating guidance and adds only Claude-specific behavior.
 
 Avoid duplicating the same long rules in every layer. Global rules belong in repository instructions; detailed procedures belong in skills.
 
@@ -44,7 +57,7 @@ Avoid duplicating the same long rules in every layer. Global rules belong in rep
 - Use a connector skill alone for connector-only work; add `etl-pipeline` only for multi-stage contracts, orchestration, replay, or recovery.
 - Prompt files remain compact legacy adapters and add context only when invoked.
 
-The validator uses a deterministic UTF-8-bytes/4 proxy to detect context growth; it is a regression metric, not a model tokenizer. Default budgets are 300 for `AGENTS.md`, 650 for repository instructions, 1,000 for `Marina`, 600 for other agents, 350 for path instructions, 250 for prompts, and 500 for each `SKILL.md`. `TOK001` is a warning normally and an error with `--strict`.
+The validator uses a deterministic UTF-8-bytes/4 proxy to detect context growth; it is a regression metric, not a model tokenizer. Default budgets are 450 for `AGENTS.md`, 300 for `CLAUDE.md`, 650 for repository instructions, 1,000 for Copilot's `Marina`, 600 for other agents, 350 for path instructions, 250 for prompts, and 500 for each `SKILL.md`. `TOK001` is a warning normally and an error with `--strict`.
 
 ## IDE compatibility as of August 2026
 
@@ -63,8 +76,8 @@ Prompt files are supported by some VS Code Copilot Chat surfaces but are not use
 
 ## Installation
 
-1. Inventory the destination repository's existing `.github/`, `.vscode/`, and `AGENTS.md` content.
-2. Merge the kit files selectively. Do not replace `.github/`, `.vscode/settings.json`, or `AGENTS.md` wholesale; preserve and reconcile repository-specific instructions, settings, agents, prompts, and skills.
+1. Choose one or more target sets and inventory the destination repository's existing `.github/`, `.codex/`, `.agents/`, `.claude/`, `AGENTS.md`, and `CLAUDE.md` content.
+2. Merge only the selected set. Do not replace existing customization directories or instruction files wholesale; reconcile repository-specific instructions, settings, agents, prompts, and skills.
 3. Edit `AGENTS.md` with the real module paths and commands.
 4. Review the `applyTo` globs in `.github/instructions/` for the destination layout.
 5. Remove irrelevant agents, prompts, or skills together with their dependent references, then rerun validation.
@@ -79,6 +92,18 @@ Prompt files are supported by some VS Code Copilot Chat surfaces but are not use
 - Prompts are read from `.github/prompts` only by compatible legacy/extension-host surfaces and can be invoked there with `/prompt-name`; the Agent Host does not use them.
 - Skills are read from `.github/skills` and can load automatically or appear as slash commands.
 - The included setting helps a subfolder workspace discover customizations from a parent monorepo root.
+
+### Codex
+
+- Launch Codex from the repository root so it discovers `AGENTS.md`, `.codex/agents/`, and `.agents/skills/`.
+- Give the main thread an unclassified or cross-stack request and let the coordination rules route specialists. You may also explicitly request `alice`, `bruno`, `paula`, `gabriel`, `diana`, `sofia`, or `clara`.
+- Agents inherit the session model and reasoning effort. Read-only roles use a read-only sandbox; implementation roles use workspace write access.
+
+### Claude Code
+
+- Launch coordinated work with `claude --agent marina`, or select a focused agent with `claude --agent <name>`.
+- Run Marina as the main-session agent. Do not invoke Marina as a background subagent because that mode does not provide the recursive coordination surface required by this workflow.
+- Agents inherit the session model. Their tool lists keep Sofia, Clara, and Marina read-only while implementation specialists receive edit tools.
 
 ### IntelliJ and other JetBrains IDEs
 

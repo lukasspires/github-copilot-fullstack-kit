@@ -29,6 +29,17 @@ FIELD = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9_-]*):(?P<value>.*)$")
 URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 INSTALLED_PLACEHOLDER = re.compile(r"\[path\s+or\s+N/A\]", re.IGNORECASE)
+CLAUDE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+EXPECTED_AGENTS = frozenset(
+    ("alice", "bruno", "clara", "diana", "gabriel", "marina", "paula", "sofia")
+)
+EXPECTED_SKILLS = frozenset(
+    (
+        "angular-feature", "api-ingestion", "data-analysis", "etl-pipeline",
+        "file-ingestion", "java-rest-api", "quality-gate", "web-scraping",
+    )
+)
+READ_ONLY_AGENTS = frozenset(("clara", "marina", "sofia"))
 BUILTIN_PROMPT_AGENTS = frozenset(("ask", "agent", "plan"))
 TOKEN_BUDGETS = {
     "agent": 600,
@@ -37,7 +48,8 @@ TOKEN_BUDGETS = {
     "skill": 500,
 }
 TOKEN_BUDGET_OVERRIDES = {
-    "AGENTS.md": 300,
+    "AGENTS.md": 450,
+    "CLAUDE.md": 300,
     ".github/copilot-instructions.md": 650,
     ".github/agents/task-coordinator.agent.md": 1000,
 }
@@ -318,6 +330,91 @@ def parse_frontmatter(
     return ParsedDocument(metadata, field_lines, body, text), diagnostics
 
 
+def parse_agent_toml(
+    path: Path, root: Path
+) -> tuple[ParsedDocument, list[Diagnostic]]:
+    """Parse the dependency-free TOML subset used by Codex agent files."""
+
+    diagnostics: list[Diagnostic] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        diagnostics.append(
+            _diagnostic("IO001", Severity.ERROR, root, path, 1, f"cannot read UTF-8 text: {error}")
+        )
+        return ParsedDocument({}, {}, "", ""), diagnostics
+
+    metadata: dict[str, object] = {}
+    field_lines: dict[str, int] = {}
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line_number = index + 1
+        line = lines[index].strip()
+        index += 1
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            diagnostics.append(
+                _diagnostic(
+                    "TOML004", Severity.ERROR, root, path, line_number,
+                    "Codex agent files must use top-level scalar fields only",
+                )
+            )
+            continue
+        if "=" not in line:
+            diagnostics.append(
+                _diagnostic("TOML001", Severity.ERROR, root, path, line_number, "expected 'key = value'")
+            )
+            continue
+        key, raw_value = (part.strip() for part in line.split("=", 1))
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", key):
+            diagnostics.append(
+                _diagnostic("TOML001", Severity.ERROR, root, path, line_number, f"invalid key {key!r}")
+            )
+            continue
+        if key in metadata:
+            diagnostics.append(
+                _diagnostic("TOML002", Severity.ERROR, root, path, line_number, f"duplicate field {key!r}")
+            )
+            continue
+        value: Optional[str] = None
+        if raw_value == '"""':
+            content: list[str] = []
+            while index < len(lines) and lines[index].strip() != '"""':
+                content.append(lines[index])
+                index += 1
+            if index >= len(lines):
+                diagnostics.append(
+                    _diagnostic("TOML003", Severity.ERROR, root, path, line_number, f"unterminated multiline string for {key!r}")
+                )
+                continue
+            index += 1
+            value = "\n".join(content)
+        elif raw_value.startswith('"'):
+            try:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError as error:
+                diagnostics.append(
+                    _diagnostic("TOML003", Severity.ERROR, root, path, line_number, f"invalid quoted string: {error}")
+                )
+                continue
+            if isinstance(decoded, str):
+                value = decoded
+        if value is None:
+            diagnostics.append(
+                _diagnostic(
+                    "TOML003", Severity.ERROR, root, path, line_number,
+                    "agent fields must be quoted strings or multiline strings",
+                )
+            )
+            continue
+        metadata[key] = value
+        field_lines[key] = line_number
+
+    return ParsedDocument(metadata, field_lines, str(metadata.get("developer_instructions", "")), text), diagnostics
+
+
 def _sorted_paths(paths: Iterable[Path]) -> list[Path]:
     return sorted(paths, key=lambda item: (item.as_posix().casefold(), item.as_posix()))
 
@@ -356,6 +453,40 @@ def _context_budget_paths(root: Path) -> list[tuple[Path, int]]:
     skill_dir = github / "skills"
     add(
         skill_dir.glob("*/SKILL.md") if skill_dir.is_dir() else [],
+        TOKEN_BUDGETS["skill"],
+    )
+
+    codex_agent_dir = root / ".codex" / "agents"
+    add(
+        codex_agent_dir.glob("*.toml") if codex_agent_dir.is_dir() else [],
+        TOKEN_BUDGETS["agent"],
+    )
+    codex_instruction_dir = root / ".codex" / "instructions"
+    add(
+        codex_instruction_dir.glob("*.md")
+        if codex_instruction_dir.is_dir()
+        else [],
+        TOKEN_BUDGETS["instruction"],
+    )
+    codex_skill_dir = root / ".agents" / "skills"
+    add(
+        codex_skill_dir.glob("*/SKILL.md") if codex_skill_dir.is_dir() else [],
+        TOKEN_BUDGETS["skill"],
+    )
+
+    claude_agent_dir = root / ".claude" / "agents"
+    add(
+        claude_agent_dir.glob("*.md") if claude_agent_dir.is_dir() else [],
+        TOKEN_BUDGETS["agent"],
+    )
+    claude_rule_dir = root / ".claude" / "rules"
+    add(
+        claude_rule_dir.glob("*.md") if claude_rule_dir.is_dir() else [],
+        TOKEN_BUDGETS["instruction"],
+    )
+    claude_skill_dir = root / ".claude" / "skills"
+    add(
+        claude_skill_dir.glob("*/SKILL.md") if claude_skill_dir.is_dir() else [],
         TOKEN_BUDGETS["skill"],
     )
 
@@ -815,11 +946,17 @@ def _local_link_diagnostic(
 
 def _markdown_files(root: Path) -> list[Path]:
     candidates: set[Path] = set()
-    for name in ("README.md", "AGENTS.md"):
+    for name in ("README.md", "AGENTS.md", "CLAUDE.md"):
         path = root / name
         if path.is_file():
             candidates.add(path)
-    for directory in (root / ".github", root / "docs"):
+    for directory in (
+        root / ".github",
+        root / ".agents",
+        root / ".codex",
+        root / ".claude",
+        root / "docs",
+    ):
         if directory.is_dir():
             candidates.update(path for path in directory.rglob("*.md") if path.is_file())
     return _sorted_paths(candidates)
@@ -846,6 +983,165 @@ def _validate_links(root: Path, diagnostics: list[Diagnostic]) -> None:
             result = _local_link_diagnostic(root, path, target, line)
             if result is not None:
                 diagnostics.append(result)
+
+
+def _validate_skill_tree(
+    root: Path, skill_dir: Path, platform: str, diagnostics: list[Diagnostic]
+) -> dict[str, Identifier]:
+    """Validate one platform's independent Agent Skills tree."""
+
+    skills: dict[str, Identifier] = {}
+    paths = skill_dir.glob("*/SKILL.md") if skill_dir.is_dir() else []
+    for path in _sorted_paths(paths):
+        document, parse_diagnostics = parse_frontmatter(path, root)
+        diagnostics.extend(parse_diagnostics)
+        name = _required_string(document, "name", root, path, diagnostics)
+        description = _required_string(document, "description", root, path, diagnostics)
+        name_line = document.field_lines.get("name", 1)
+        if name is not None:
+            if name != path.parent.name:
+                diagnostics.append(
+                    _diagnostic(
+                        "SKILL001", Severity.ERROR, root, path, name_line,
+                        f"{platform} skill name {name!r} must exactly match directory {path.parent.name!r}",
+                    )
+                )
+            if len(name) > 64:
+                diagnostics.append(
+                    _diagnostic("SKILL002", Severity.ERROR, root, path, name_line, "skill name exceeds 64 characters")
+                )
+            _register_identifier(skills, name, root, path, name_line, f"{platform} skill", diagnostics)
+        if description is not None and len(description) > 1024:
+            diagnostics.append(
+                _diagnostic(
+                    "SKILL003", Severity.ERROR, root, path,
+                    document.field_lines.get("description", 1),
+                    "skill description exceeds 1024 characters",
+                )
+            )
+        if not document.body.strip():
+            diagnostics.append(
+                _diagnostic(
+                    "SKILL004", Severity.ERROR, root, path,
+                    max(document.field_lines.values(), default=1) + 2,
+                    "skill body must contain instructions after frontmatter",
+                )
+            )
+    return skills
+
+
+def _validate_codex(root: Path, diagnostics: list[Diagnostic]) -> None:
+    agent_dir = root / ".codex" / "agents"
+    if not agent_dir.is_dir():
+        return
+    identifiers: dict[str, Identifier] = {}
+    for path in _sorted_paths(agent_dir.glob("*.toml")):
+        document, parse_diagnostics = parse_agent_toml(path, root)
+        diagnostics.extend(parse_diagnostics)
+        name = _required_string(document, "name", root, path, diagnostics)
+        _required_string(document, "description", root, path, diagnostics)
+        instructions = _required_string(document, "developer_instructions", root, path, diagnostics)
+        sandbox = _required_string(document, "sandbox_mode", root, path, diagnostics)
+        if name is None:
+            continue
+        _register_identifier(
+            identifiers, name, root, path, document.field_lines.get("name", 1),
+            "Codex agent", diagnostics,
+        )
+        if path.stem != name:
+            diagnostics.append(
+                _diagnostic("CODEX001", Severity.ERROR, root, path, 1, f"agent filename must match name {name!r}")
+            )
+        expected_sandbox = "read-only" if name in READ_ONLY_AGENTS else "workspace-write"
+        if sandbox is not None and sandbox != expected_sandbox:
+            diagnostics.append(
+                _diagnostic(
+                    "CODEX002", Severity.ERROR, root, path,
+                    document.field_lines.get("sandbox_mode", 1),
+                    f"agent {name!r} requires sandbox_mode {expected_sandbox!r}",
+                )
+            )
+        if "model" in document.metadata or "model_reasoning_effort" in document.metadata:
+            diagnostics.append(
+                _diagnostic("CODEX003", Severity.ERROR, root, path, 1, "kit agents must inherit model and reasoning effort")
+            )
+        if instructions is not None and name in READ_ONLY_AGENTS and "never" not in instructions.casefold():
+            diagnostics.append(
+                _diagnostic("CODEX004", Severity.ERROR, root, path, 1, "read-only agent instructions must explicitly prohibit modification")
+            )
+    missing = sorted(EXPECTED_AGENTS.difference(identifiers))
+    if missing:
+        diagnostics.append(
+            _diagnostic("CODEX005", Severity.ERROR, root, agent_dir, 1, "missing expected Codex agents: " + ", ".join(missing))
+        )
+    codex_skills = _validate_skill_tree(root, root / ".agents" / "skills", "Codex", diagnostics)
+    missing_skills = sorted(EXPECTED_SKILLS.difference(codex_skills))
+    if missing_skills:
+        diagnostics.append(
+            _diagnostic("CODEX006", Severity.ERROR, root, root / ".agents" / "skills", 1, "missing expected Codex skills: " + ", ".join(missing_skills))
+        )
+
+
+def _validate_claude(root: Path, diagnostics: list[Diagnostic]) -> None:
+    agent_dir = root / ".claude" / "agents"
+    if not agent_dir.is_dir():
+        return
+    identifiers: dict[str, Identifier] = {}
+    claude_skills = _validate_skill_tree(root, root / ".claude" / "skills", "Claude", diagnostics)
+    for path in _sorted_paths(agent_dir.glob("*.md")):
+        document, parse_diagnostics = parse_frontmatter(path, root)
+        diagnostics.extend(parse_diagnostics)
+        name = _required_string(document, "name", root, path, diagnostics)
+        _required_string(document, "description", root, path, diagnostics)
+        tools = _optional_string_list(document, "tools", root, path, diagnostics, required=True)
+        model = _optional_string(document, "model", root, path, diagnostics)
+        _required_string(document, "permissionMode", root, path, diagnostics)
+        preloaded = _optional_string_list(document, "skills", root, path, diagnostics)
+        if name is None:
+            continue
+        _register_identifier(
+            identifiers, name, root, path, document.field_lines.get("name", 1),
+            "Claude agent", diagnostics,
+        )
+        if not CLAUDE_AGENT_NAME.fullmatch(name) or path.stem != name:
+            diagnostics.append(
+                _diagnostic("CLAUDE001", Severity.ERROR, root, path, 1, "Claude agent name must be lowercase hyphenated and match its filename")
+            )
+        if model is not None and model != "inherit":
+            diagnostics.append(
+                _diagnostic("CLAUDE002", Severity.ERROR, root, path, document.field_lines.get("model", 1), "kit agents must use model: inherit")
+            )
+        write_tools = {"Edit", "Write"}
+        if tools is not None:
+            if name in READ_ONLY_AGENTS and write_tools.intersection(tools):
+                diagnostics.append(
+                    _diagnostic("CLAUDE003", Severity.ERROR, root, path, document.field_lines.get("tools", 1), f"read-only agent {name!r} cannot expose Edit or Write")
+                )
+            if name not in READ_ONLY_AGENTS and not write_tools.issubset(tools):
+                diagnostics.append(
+                    _diagnostic("CLAUDE004", Severity.ERROR, root, path, document.field_lines.get("tools", 1), f"writer agent {name!r} requires Edit and Write")
+                )
+        for skill in preloaded or []:
+            if skill.casefold() not in claude_skills:
+                diagnostics.append(
+                    _diagnostic("CLAUDE005", Severity.ERROR, root, path, document.field_lines.get("skills", 1), f"agent preloads unknown Claude skill {skill!r}")
+                )
+    missing = sorted(EXPECTED_AGENTS.difference(identifiers))
+    if missing:
+        diagnostics.append(
+            _diagnostic("CLAUDE006", Severity.ERROR, root, agent_dir, 1, "missing expected Claude agents: " + ", ".join(missing))
+        )
+    missing_skills = sorted(EXPECTED_SKILLS.difference(claude_skills))
+    if missing_skills:
+        diagnostics.append(
+            _diagnostic("CLAUDE007", Severity.ERROR, root, root / ".claude" / "skills", 1, "missing expected Claude skills: " + ", ".join(missing_skills))
+        )
+
+    rule_dir = root / ".claude" / "rules"
+    for path in _sorted_paths(rule_dir.glob("*.md") if rule_dir.is_dir() else []):
+        document, parse_diagnostics = parse_frontmatter(path, root)
+        diagnostics.extend(parse_diagnostics)
+        _optional_string_list(document, "paths", root, path, diagnostics, required=True)
 
 
 def _validate_installed(root: Path, diagnostics: list[Diagnostic]) -> None:
@@ -1153,6 +1449,8 @@ def validate(
             )
         )
 
+    _validate_codex(root, diagnostics)
+    _validate_claude(root, diagnostics)
     _validate_links(root, diagnostics)
     _validate_token_budgets(root, diagnostics)
     if installed:
@@ -1196,7 +1494,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = DiagnosticArgumentParser(
         description=(
             "Validate the dependency-free structural subset used by the "
-            "GitHub Copilot customization kit."
+            "Copilot, Codex, and Claude Code customization kit."
         )
     )
     parser.add_argument(

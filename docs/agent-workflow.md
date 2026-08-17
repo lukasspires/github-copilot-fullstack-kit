@@ -1,6 +1,6 @@
 # Agent workflow
 
-This kit uses a non-editing coordinator, implementation specialists, and an independent review role. In the VS Code Agent Host, select `Marina` directly and describe the desired outcome. Prompt files are a legacy compatibility surface and are not the Agent Host entry point.
+This kit uses a non-editing coordinator, implementation specialists, and an independent review role across Copilot, Codex, and Claude Code. In the VS Code Agent Host, select `Marina` directly. Prompt files are a Copilot-only legacy compatibility surface.
 
 When agent delegation is unavailable, select the named specialist manually and include the delegation contract below in the chat. Specialists remain visible so focused work does not need to pass through the coordinator.
 
@@ -92,6 +92,8 @@ Pure analytical work is self-validated by `Diana` for source traceability, metri
 - **VS Code Agent Host (primary):** select `Marina` or a focused specialist directly. The coordinator delegates through the agent tool.
 - **Compatible legacy extension host:** prompt files such as `/execute-task`, `/modify-etl`, and `/analyze-data` remain available when that host loads `.github/prompts`.
 - **Manual fallback:** select each specialist in the documented sequence and paste the delegation contract and preceding agent's handoff into the next chat.
+- **Codex:** launch at the repository root. The main thread follows `AGENTS.md` and delegates to project agents under `.codex/agents/`; skills load from `.agents/skills/`.
+- **Claude Code:** use `claude --agent marina` for coordinated work or `claude --agent <specialist>` for a bounded task. Marina must be the main session agent rather than a background subagent; skills and path rules load from `.claude/skills/` and `.claude/rules/`.
 
 Prompt files are not used by the VS Code Agent Host. Check the [VS Code prompt files documentation](https://code.visualstudio.com/docs/agent-customization/prompt-files) for current limitations and the [custom agents documentation](https://code.visualstudio.com/docs/agent-customization/custom-agents) for agent delegation behavior.
 
