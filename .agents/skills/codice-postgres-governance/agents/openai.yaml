@@ -1,0 +1,4 @@
+interface:
+  display_name: "PostgreSQL conforme o Codice"
+  short_description: "Governa criacao e restauracao PostgreSQL"
+  default_prompt: "Use $codice-postgres-governance para planejar uma criacao ou restauracao PostgreSQL governada pelo Codice."

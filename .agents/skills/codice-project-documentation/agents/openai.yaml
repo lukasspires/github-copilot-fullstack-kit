@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentacao conforme o Codice"
+  short_description: "Padroniza README e diagramas de projetos"
+  default_prompt: "Use $codice-project-documentation para atualizar README ou diagramas conforme o Codice."

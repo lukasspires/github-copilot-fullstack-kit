@@ -12,6 +12,13 @@
 - Parallelize only independent read-only discovery. Run writers sequentially and give each one an exact write set, acceptance criteria, affected contracts, risks, and required checks.
 - Require specialist handoffs with `status`, `changed`, `checks`, `evidence`, `risks`, and `next` fields.
 
+## Códice governance
+
+- Apply `.agents/skills/codice-*` and `git-branch-commit-conventions` only when repository or task evidence places the work under SES/SC, NADS, or DTIG governance; never impose them on unrelated projects.
+- Use `codice-api-contracts` for governed APIs and consumers, `codice-go-echo-api` for governed Go APIs, `codice-project-documentation` for README/diagrams, and the Git skills for task and release workflows.
+- Route release/tag/environment mutations to an authorized Engineer or Tech Lead and PostgreSQL provisioning/restores to DBA/Infrastructure. Project coding agents may prepare and validate plans, but must not impersonate these operational roles.
+- Treat the Códice as the source of truth for current infrastructure maps and procedures; do not copy credentials, internal inventories, or host maps into repository guidance.
+
 ## Project map
 
 Update this section in each repository:
@@ -32,3 +39,4 @@ Update this section in each repository:
 - Add tests before or alongside the implementation.
 - Run only discovered repository commands and report exact results or skipped checks.
 - Do not hand-edit generated files or change lockfiles unless their source or dependencies changed.
+- For governed work, include applicable ADR/NOTEC identifiers and Códice compliance evidence in the handoff.

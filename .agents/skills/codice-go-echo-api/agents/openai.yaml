@@ -1,0 +1,4 @@
+interface:
+  display_name: "APIs Go Echo do Codice"
+  short_description: "Implementa APIs Go com Echo e camadas"
+  default_prompt: "Use $codice-go-echo-api para implementar uma API Go governada pelo Codice."

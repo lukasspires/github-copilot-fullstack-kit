@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contratos de API do Codice"
+  short_description: "Aplica contratos corporativos de APIs"
+  default_prompt: "Use $codice-api-contracts para implementar ou revisar um contrato de API governado pelo Codice."

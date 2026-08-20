@@ -1,0 +1,4 @@
+interface:
+  display_name: "Branches, commits e changelog"
+  short_description: "Aplica o fluxo Git cotidiano do Codice"
+  default_prompt: "Use $git-branch-commit-conventions para criar uma branch, atualizar o changelog ou preparar um commit conforme o Codice."

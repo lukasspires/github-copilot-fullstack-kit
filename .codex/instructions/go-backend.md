@@ -1,6 +1,7 @@
 # Go backend instructions
 
-- Detect the Go version, framework, HTTP/RPC protocol, architecture, persistence, migrations, and test stack; do not impose a framework or storage library.
+- Detect the Go version, framework, HTTP/RPC protocol, architecture, persistence, migrations, test stack, and whether Códice governance applies; do not impose a framework or storage library on unrelated or legacy projects.
+- For a new governed Go API, apply `.agents/skills/codice-go-echo-api/SKILL.md` and `.agents/skills/codice-api-contracts/SKILL.md`. Preserve an existing legacy framework/layout unless migration is explicitly approved.
 - Keep transports thin and domain/application behavior separate. Define stable request, response, RPC, and error contracts.
 - Validate and authenticate at boundaries, authorize each protected operation, and never leak internals or secrets through errors, logs, metrics, or traces.
 - Propagate `context.Context`, honor cancellation and deadlines, close resources, and preserve `errors.Is` and `errors.As` behavior.
