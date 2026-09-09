@@ -1,4 +1,4 @@
 interface:
   display_name: "Release GitLab do Codice"
-  short_description: "Conduz releases conforme o fluxo oficial"
+  short_description: "Planeja releases com evidencias do projeto"
   default_prompt: "Use $codice-gitlab-release-flow para planejar ou executar uma release conforme o Codice."

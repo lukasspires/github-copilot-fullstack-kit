@@ -5,18 +5,11 @@ description: Design or modify multi-stage ETLs with contracts, idempotency, chec
 
 # Reliable ETL pipeline
 
-Use this skill for multi-stage pipeline contracts, orchestration, recovery, or replay. For a connector-only change, use the matching API, file, or scraping skill instead.
+Use for changes to multi-stage contracts, orchestration, recovery or replay. Connector-only fixes use the matching API, file or scraping skill.
 
-## Workflow
-
-1. Inspect runtime, scheduler, storage, schemas, checkpoints, tests, and established pipeline patterns.
-2. Complete [the pipeline checklist](./templates/pipeline-checklist.md), including contracts and failure classes.
-3. Design idempotency, checkpoints, replay, and validation behavior before implementation.
-4. Bound memory, concurrency, retries, pagination, and execution time; add stage logs and metrics.
-5. Test transformations and adapter contracts; document run, recovery, backfill, and rollback.
-
-## Required outcomes
-
-- No silent loss; stable keys and safe restart after partial failure.
-- Explicit schema/timezone behavior and offline tests.
-
+- Inspect affected runtime, scheduler, source/destination schema, keys, transformations and recovery paths; reuse established patterns and evidence.
+- Consult affected items in [the pipeline checklist](templates/pipeline-checklist.md). A small correction does not mandate new checkpoints, metrics, artifacts or a complete pipeline redesign.
+- Preserve precision, audit, null/default and timezone semantics unless explicitly changed. For normalization of keys, investigate collisions, upsert behavior and existing historical rows before deciding whether migration/backfill is needed.
+- Involve Sofia for material architecture, shared contracts, migrations/backfills. Live replay/backfill requires corresponding authorization; local implementation/testing can continue independently.
+- For new or affected recovery logic, establish idempotency, durable checkpoint ordering, partial-failure restart and bounds on memory/concurrency/retries. Add observability or run/recovery documentation where changed behavior needs it.
+- Test the altered transformations and failure boundaries with representative offline fixtures. Use Clara for data-integrity or critical operational changes and report unresolved historical-data risks.

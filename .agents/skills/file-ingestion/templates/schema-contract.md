@@ -1,5 +1,7 @@
 # File schema contract
 
+Use only items relevant to the requested change. This is a reference aid, not a required completed artifact or authorization to expand scope.
+
 - File location/pattern:
 - Format and compression:
 - Encoding and delimiter:

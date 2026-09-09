@@ -5,9 +5,10 @@ description: Build API ingestion with authentication, pagination, rate limits, r
 
 # API ingestion
 
-1. Inspect existing HTTP, auth, configuration, logging, and serialization patterns.
-2. Complete [the connector checklist](./templates/connector-contract.md) before implementation.
-3. Keep secrets out of code/logs; set explicit timeouts and bounded transient-only retries with jitter and server retry hints.
-4. Implement pagination/cursors, validate status/content/schema, make writes idempotent, and persist checkpoints atomically.
-5. Add request/latency/page/record/retry/throttle/failure metrics and offline contract tests using sanitized fixtures or mocks.
+Inspect the affected connector's HTTP, auth, schema, storage and test patterns. Reuse intake evidence; a narrow fix does not require redesigning the ingestion pipeline.
 
+- Preserve source/destination contracts and existing pagination, keys and recovery behavior unless the requested change affects them.
+- For new or affected acquisition logic, address explicit timeouts, bounded transient retries and server rate hints. Add pagination/cursors only if the source needs them; never retry permanent validation failures blindly.
+- When writes or recovery change, establish durable-write/checkpoint ordering and idempotency. Keep secrets out of code, logs and fixtures.
+- Consult affected items in [the connector contract](templates/connector-contract.md); no complete document or new metrics/checkpoint system is required for a trivial correction.
+- Test the changed success/failure boundaries with sanitized fixtures or mocks. Add observability only where needed to detect the affected failure mode.

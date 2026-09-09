@@ -5,16 +5,10 @@ description: Build authorized scrapers with rate limits, offline parser tests, c
 
 # Authorized web scraping
 
-## Preconditions
+Use public or explicitly authorized resources and prefer an available official API/export/feed. Do not bypass access restrictions or rate limits. Apply [scraping safeguards](references/safeguards.md) to affected acquisition or data handling.
 
-- Confirm public or explicit authorization and prefer an official API/export/feed when available.
-- Never bypass login, paywalls, CAPTCHA, anti-bot mechanisms, robots restrictions, rate limits, or other controls.
-
-## Workflow
-
-1. Review [scraping safeguards](./references/safeguards.md); separate acquisition from parsing/normalization.
-2. Configure identification when appropriate, explicit timeouts, conservative rates, and bounded backoff.
-3. Prefer semantic/structured selectors and stable IDs; validate status, content, page markers, and record counts.
-4. Persist checkpoints/stable keys, use sanitized offline parser fixtures, and fail visibly on layout/schema drift.
-5. Minimize collection and retention of personal or sensitive data.
-
+- Reuse existing acquisition/parser separation, cached responses and sanitized fixtures. A selector fix does not require a crawler redesign.
+- For new or affected acquisition, use appropriate identification, timeouts, conservative concurrency and bounded backoff.
+- Prefer stable semantic/structured selectors and validate affected page/content markers so layout drift is visible rather than silent record loss.
+- Preserve keys and checkpoints already in use. Add durable recovery or metrics only when required by the requested acquisition/restart behavior.
+- Test altered parsing offline against representative success and changed-layout/invalid cases; minimize sensitive collection and retention.

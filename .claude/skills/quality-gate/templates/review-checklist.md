@@ -1,5 +1,7 @@
 # Pre-merge review checklist
 
+Use only items relevant to the requested change. This is a reference aid, not a required completed artifact or authorization to expand scope.
+
 - Scope matches request:
 - Public contracts preserved or documented:
 - Validation and authorization:

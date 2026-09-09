@@ -1,5 +1,7 @@
 # Angular feature checklist
 
+Use only items relevant to the requested change. This is a reference aid, not a required completed artifact or authorization to expand scope.
+
 - User story and acceptance criteria:
 - Route/entry point:
 - Authorization/guards:

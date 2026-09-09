@@ -5,16 +5,10 @@ description: Analyze repository data reproducibly with profiling, metric validat
 
 # Reproducible data analysis
 
-1. Translate the request into a measurable question and complete [the analysis contract](./references/analysis-contract.md); mark unavailable details as assumptions.
-2. Discover data access, schemas, metric definitions, repository conventions, privacy rules, and rerun/test commands.
-3. Profile freshness, counts, types, keys, nulls, duplicates, ranges, units, and join cardinality.
-4. Preserve raw inputs and use deterministic, reviewable SQL/code with seeded randomness.
-5. Reconcile important results through totals, boundaries, or an independent calculation when practical.
-6. Store reusable artifacts/tests without sensitive extracts. Separate conclusions from methods, assumptions, limitations, uncertainty, and unsupported causal claims.
+Use for a substantive question, metric or reconciliation investigation; a SQL file or migration alone does not require analysis work.
 
-## Required outcomes
-
-- Numbers trace to sources and reproducible computations.
-- Metrics, filters, data-quality handling, and expected-volume bounds are explicit.
-- The handoff includes conclusions, limitations, artifact paths, and exact rerun commands.
-
+- Establish question, source, grain, timeframe and definitions from available evidence. Consult relevant fields of [the analysis contract](references/analysis-contract.md) only when they resolve ambiguity; do not require a separate artifact.
+- Profile dimensions that can affect the conclusion: freshness, nulls, duplicates, types, units, joins or boundaries. Reuse already verified source/schema evidence.
+- Preserve raw inputs and compute reproducibly with deterministic SQL/code and controlled randomness when used. Respect module-specific dependency restrictions without expanding them to unrelated modules.
+- Reconcile material results through independent totals or calculations where practical. Separate observed findings, assumptions, uncertainty and causal claims.
+- Deliver requested results with provenance, computation/query or rerun command and limitations. Persist reusable artifacts only when useful or requested; do not store sensitive extracts by default.

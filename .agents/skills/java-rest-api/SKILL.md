@@ -5,9 +5,10 @@ description: Implement Java APIs with stable contracts, validation, authorizatio
 
 # Java REST API
 
-1. Inspect the actual Java/framework/build, security, persistence, migration, documentation, test conventions, and whether Códice governance applies.
-2. For governed APIs, apply `codice-api-contracts`; its POST/body/tag rules and `/healthz` exception override generic HTTP defaults, while security and compatibility constraints still apply. Do not retrofit an incompatible legacy contract without approval.
-3. Complete [the endpoint checklist](./templates/endpoint-checklist.md) for contracts, compatibility, auth, transactions, queries, and rollout.
-4. Keep controllers thin, validate/authorize at boundaries, and map failures to stable errors without leaking details.
-5. Bound queries/pagination, prevent N+1 behavior, and avoid remote calls inside long transactions.
-6. Add unit/integration tests, update API docs/migrations when needed, and run wrapper-based quality gates.
+Inspect affected Java modules, framework/build, contracts, security, persistence and nearby tests. Use existing layers and models.
+
+- Preserve published methods, fields, envelopes, HTTP statuses and consumer semantics. For evidenced governance, consult `codice-api-contracts` on affected contracts; its historical conventions do not override local evidence.
+- Validate and authorize at the appropriate boundary; request context identifiers are not authentication. Keep controllers focused and avoid sensitive error details.
+- When persistence changes, review transaction boundaries, query bounds, indexes and N+1 risks; do not add pagination or migrations unrelated to the task.
+- Consult affected items in [the endpoint checklist](templates/endpoint-checklist.md), without requiring a new checklist artifact or DTO.
+- Add regression/unit/integration checks appropriate to changed behavior and run relevant discovered project commands. Update API specs or rollout/migration documentation only when affected.

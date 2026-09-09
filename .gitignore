@@ -1,0 +1,7 @@
+# Local task continuity; never commit task context.
+.agent-state/
+Task #5231.pdf
+Task #5233.pdf
+Task #7976.pdf
+Task #8144.pdf
+Task #8145.pdf

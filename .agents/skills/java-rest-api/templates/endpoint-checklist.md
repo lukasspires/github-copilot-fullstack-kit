@@ -1,5 +1,7 @@
 # Java endpoint checklist
 
+Use only items relevant to the requested change. This is a reference aid, not a required completed artifact or authorization to expand scope.
+
 - Method/path or operation:
 - Authentication:
 - Authorization rule:

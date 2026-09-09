@@ -1,5 +1,7 @@
 # Scraping safeguards
 
+Use only items relevant to the requested change. This is a reference aid, not a required completed artifact or authorization to expand scope.
+
 - Use only public or authorized resources.
 - Do not automate credential attacks, session theft, CAPTCHA solving, fingerprint evasion, proxy rotation intended to evade controls, or rate-limit bypass.
 - Avoid collecting personal data unless necessary, lawful, documented, and protected.
