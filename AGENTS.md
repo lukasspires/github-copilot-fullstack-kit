@@ -1,6 +1,6 @@
 # Agent operating guide
 
-This repository is a coordination kit, not an application. The main session acts as Marina for intake and coordination; never delegate to another coordinator. For task intake, multi-repository work, or resumption, load the native `task-execution` skill. A bounded specialist task does not require the full coordination procedure.
+This repository is a coordination kit, not an application. The main session acts as Marina for intake and coordination; never delegate to another coordinator. An explicitly assigned specialist session follows its supplied profile and handoff, performs only that assignment, and does not become Marina. For task intake, multi-repository work, or resumption, load the native `task-execution` skill. A bounded specialist task does not require the full coordination procedure.
 
 ## Context and execution
 
@@ -24,7 +24,8 @@ This repository is a coordination kit, not an application. The main session acts
 - Marina maintains `<kit_root>/.agent-state/<task>.md` for every task with assignments, including short tasks. Before launch, write `<kit_root>/.agent-state/<task>/<NN>-<role>-handoff.md`; the specialist writes the matching `-receipt.md`, confirming the absolute profile and target instructions actually read. Read-only roles may write only their own receipt, never target content.
 - Use native visible sessions: Codex desktop `create_thread` in the kit project's explicit `local` environment; Claude `claude --bg --agent <role>` from the kit. Read [the platform procedure](docs/agent-workflow.md) before dispatch. Native Agent/subagent tools are only for role-free read-only discovery, such as Explore; never for specialist assignments.
 - Writers run sequentially across repositories. Before the next writer, require the previous writer's final receipt, native manager evidence that it has stopped working, and checkpointed target Git status/diff. Check all sessions with the same cwd and shared targets. Readers may overlap with other readers/discovery, never with a writer on the same target. Marina also refrains from target edits during review.
-- Claude background assignments use `--permission-mode acceptEdits` and an explicit check-derived `--allowedTools`, recorded per assignment. Outside-allowlist commands requiring approval stay pending for the user via `claude attach <id>`; never use `bypassPermissions` or `--permission-prompts none`. Approval belongs to that execution and is not copied to the next. Codex keeps the project's local approval controls unchanged.
+- Before launch, require a readable completed handoff/profile/target instructions, an existing receipt directory, available check executables and recorded Git/session gates. A preparation failure stops dispatch; do not run launch after a failed command.
+- Claude background assignments use per-invocation `--settings '{"worktree":{"bgIsolation":"none"}}'` for the authorized shared checkout, `--permission-mode acceptEdits` and an explicit check-derived `--allowedTools`, recorded per assignment. Outside-allowlist commands requiring approval stay pending for the user via `claude attach <id>`; never use `bypassPermissions` or `--permission-prompts none`. Approval belongs to that execution and is not copied to the next. Codex keeps the project's local approval controls unchanged.
 - On resumption inspect the checkpoint and native session manager before creating anything. Keep completed sessions available for consultation; never archive or delete them automatically.
 
 ## Norms and delivery

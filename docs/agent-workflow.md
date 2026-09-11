@@ -32,6 +32,8 @@ Before dispatch Marina writes a sanitized, Git-ignored `<kit_root>/.agent-state/
 - Acceptance criteria; discovered verification commands and workdirs; preservation warning because others may have worked on the same files.
 - Assignment ID, predecessor, type, receipt path and exact granted tool allowlist.
 
+Before launch, verify the completed handoff, profile and target instructions are readable, the receipt directory exists, and discovered check executables are available in the session environment. Record preparation and Git/session gates in the checkpoint. If any preparation fails, stop before dispatch; use separate successful preparation and launch steps or a fail-fast script.
+
 The launch prompt is short: `Act as <role>. Read <absolute-profile> and <absolute-handoff>, then execute the assignment.` Do not paste prior conversations. The specialist performs only that assignment and writes the matching `-receipt.md`, never starts another coordination. Read-only roles may write that receipt only; they never edit targets. Their profiles intentionally rely on this instruction boundary and the existing runtime controls, rather than a blanket read-only mode that would also prohibit the receipt.
 
 Receipts contain `status` (`done`, `pending`, `needs_input`, `blocked`), `changed`, `checks` (command/workdir/actual result or skip), `evidence`, `risks`, `next` (action and owner), plus `profile_read` and `instructions_read` with absolute paths actually read. Clara adds `verdict`: `PASS`, `PASS_WITH_RISKS`, or `FAIL`. A review may finish with `status: done` and `verdict: FAIL`. Missing profile confirmation means loading unverified; a log or final chat answer is not a substitute for the receipt file.
@@ -74,10 +76,13 @@ The installed CLI was checked at version 2.1.267 on 2026-09-11: `--bg`, `--name`
 claude --bg --agent bruno \
   --name "redmine-1234 — bruno — 01 — implementação" \
   --add-dir /absolute/api \
+  --settings '{"worktree":{"bgIsolation":"none"}}' \
   --permission-mode acceptEdits \
   --allowedTools "Bash(mvn test)" \
   -- "Act as bruno. Read /absolute/kit/.claude/agents/bruno.md and /absolute/kit/.agent-state/redmine-1234/01-bruno-handoff.md, then execute."
 ```
+
+The per-invocation setting `worktree.bgIsolation: none` allows background edits in the shared checkout, including receipt writes. Its default is `worktree`, which blocks Edit/Write until isolation is entered. This setting changes checkout isolation, not permission approvals; preserve the permission mode and scoped allowlist, and do not rewrite persistent user settings. If native policy prevents shared-checkout access, report that constraint and use the disclosed fallback after reconciling active sessions. See the [official setting reference](https://code.claude.com/docs/en/settings-reference#worktree-bgisolation).
 
 Repeat `--add-dir` for other targets; do not use worktree isolation because assignments share the same local files. Never use `--resume`, `--continue` or `--fork-session` for new assignments. Capture the printed short ID and present it to the user. Monitor with `claude agents --json --all` and inspect details with `claude logs <id>`. Humans use `claude agents` and `claude attach <id>`.
 
