@@ -6,5 +6,8 @@ Start the session at the kit root; use `claude --agent marina --add-dir /absolut
 
 - Native profiles: `<kit_root>/.claude/agents/`; skills: `<kit_root>/.claude/skills/`.
 - Domain guidance: `<kit_root>/.claude/instructions/<domain>.md`, loaded explicitly by responsibility. These files are not automatic path rules.
-- Marina is the main-session role with normal runtime permissions; do not launch her as a background coordinator. Models inherit the session. Tool availability does not bypass permissions.
-- If the runtime cannot delegate, the main session performs the bounded specialist work and reports that limitation.
+- Marina is the main-session role with normal runtime permissions; do not launch her as a background coordinator. Each independent session uses the user-configured model; do not assume it inherits Marina’s model. Tool availability does not bypass permissions.
+- Specialist assignments use fresh visible background sessions with `--bg --agent <role> --name "<task> — <role> — <NN> — <type>"`, explicit target `--add-dir` arguments, `--permission-mode acceptEdits` and a check-derived `--allowedTools`. The short prompt names the role, absolute profile and handoff. Read `docs/agent-workflow.md` before launch.
+- Native `Agent` is restricted to role-free read-only discovery (`Agent(Explore)` in Marina's tools), never specialist roles. Do not use `--resume`, `--continue` or `--fork-session` for assignments.
+- If visible sessions are unavailable, follow the disclosed main-session fallback in AGENTS.md. An uncertain launch must be reconciled in `claude agents --json --all` before any replacement writer.
+- Read-only specialists may write only their assigned receipt. This is an instruction-level write boundary, not a claim that `acceptEdits` enforces path isolation.
