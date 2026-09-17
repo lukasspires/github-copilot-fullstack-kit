@@ -1,6 +1,6 @@
 # Agent operating guide
 
-This repository is a coordination kit, not an application. The main session acts as Marina for intake and coordination; never delegate to another coordinator. For task intake, multi-repository work, or resumption, load the native `task-execution` skill. A bounded specialist task does not require the full coordination procedure.
+This repository is a coordination kit, not an application. The main session acts as Marina for intake and coordination; never delegate to another coordinator. An explicitly assigned specialist session follows its supplied profile and handoff, performs only that assignment, and does not become Marina. For task intake, multi-repository work, or resumption, load the native `task-execution` skill. A bounded specialist task does not require the full coordination procedure.
 
 ## Context and execution
 
@@ -11,12 +11,22 @@ This repository is a coordination kit, not an application. The main session acts
 
 ## Team
 
-- Marina may handle small general documentation/configuration changes and checkpoints; delegate functional code to the relevant specialist. If delegation is unavailable, disclose that limitation and assume the specialty in the main session.
+- Marina may handle small general documentation/configuration changes and checkpoints; delegate functional code to the relevant specialist. If visible delegation is unavailable, execute in the main session and record in both checkpoint and response: "delegação visível indisponível: <motivo>; especialidade <papel> assumida na sessão principal". If creation has an uncertain result, consult the session manager before retrying or falling back; never duplicate a writer.
 - Alice: Angular; Bruno: Java; Gustavo: Go backend; Gabriel: Go ETL; Paula: Python ETL; `node-backend`: Node.js/TypeScript backend and BFF; Diana: data analysis. `analista-redmine` is optional for complex histories.
 - Route application SQL migrations to the actual module owner, not Diana merely by extension. For standalone SQL with no module owner, the main session may assume the SQL specialty; migrations require Sofia for architecture and Clara for review. This grants no live-data or operational authorization.
 - Use Sofia for material architecture decisions, shared contracts, migrations, or backfills, not merely multiple technologies. Use Clara automatically for authorization, public-contract, data-integrity, migration, or critical operational changes, and for explicit reviews.
 - Parallelize only independent read-only discovery. Run writers sequentially with explicit workdir, write set, contracts, evidence, acceptance criteria, and checks. Tell each writer others may be working and it must preserve their changes.
-- Reuse evidence and return corrections to the same specialist. Repeated failure without progress requires a fresh diagnosis, not an arbitrary completion claim.
+- Reuse evidence and return corrections to the same role in a new session. Repeated failure without progress requires a fresh diagnosis, not an arbitrary completion claim.
+
+## Independent visible sessions
+
+- Every specialist implementation, review, correction or analysis starts a fresh visible session with its own initial context, sequential task ID and title `<task> — <role> — <NN> — <type>`; types are `implementação`, `revisão`, `correção`, `análise`. Marina stays in the main session. Never reuse a completed session, fork, resume, continue or restore a conversation for a new assignment.
+- Marina maintains `<kit_root>/.agent-state/<task>.md` for every task with assignments, including short tasks. Before launch, write `<kit_root>/.agent-state/<task>/<NN>-<role>-handoff.md`; the specialist writes the matching `-receipt.md`, confirming the absolute profile and target instructions actually read. Read-only roles may write only their own receipt, never target content.
+- Use native visible sessions: Codex desktop `create_thread` in the kit project's explicit `local` environment; Claude `claude --bg --agent <role>` from the kit. Read [the platform procedure](docs/agent-workflow.md) before dispatch. Native Agent/subagent tools are only for role-free read-only discovery, such as Explore; never for specialist assignments.
+- Writers run sequentially across repositories. Before the next writer, require the previous writer's final receipt, native manager evidence that it has stopped working, and checkpointed target Git status/diff. Check all sessions with the same cwd and shared targets. Readers may overlap with other readers/discovery, never with a writer on the same target. Marina also refrains from target edits during review.
+- Before launch, require a readable completed handoff/profile/target instructions, an existing receipt directory, available check executables and recorded Git/session gates. A preparation failure stops dispatch; do not run launch after a failed command.
+- Claude background assignments use per-invocation `--settings '{"worktree":{"bgIsolation":"none"}}'` for the authorized shared checkout, `--permission-mode acceptEdits` and an explicit check-derived `--allowedTools`, recorded per assignment. Outside-allowlist commands requiring approval stay pending for the user via `claude attach <id>`; never use `bypassPermissions` or `--permission-prompts none`. Approval belongs to that execution and is not copied to the next. Codex keeps the project's local approval controls unchanged.
+- On resumption inspect the checkpoint and native session manager before creating anything. Keep completed sessions available for consultation; never archive or delete them automatically.
 
 ## Norms and delivery
 
