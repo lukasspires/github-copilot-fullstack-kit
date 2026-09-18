@@ -24,11 +24,11 @@ A simple fix uses one specialist. Several technologies alone do not require Sofi
 
 Marina stays in the main session and consolidates results. Every specialist assignment, including corrections and reviews, receives the next task-local NN and title `<task> — <role> — <NN> — <type>`. Types: `implementação`, `revisão`, `correção`, `análise`. Never reuse completed sessions, fork, resume, continue or restore their conversations for a new assignment.
 
-Before dispatch Marina writes a sanitized, Git-ignored `<kit_root>/.agent-state/<task>/<NN>-<role>-handoff.md`. Use a lowercase letters/digits/hyphens task slug and reject symlinks escaping `.agent-state/`. Include:
+Before dispatch Marina writes a sanitized, Git-ignored `<kit_root>/.agent-state/<project>/tasks/<task>/<NN>-<role>-handoff.md`. Use lowercase letters/digits/hyphens slugs for the project and the task, and reject symlinks escaping `.agent-state/`. Include:
 
 - Objective; role and absolute native profile path; absolute kit_root and all target_root paths.
 - Applicable target AGENTS.md/CLAUDE.md and domain instructions to read explicitly: launching from the kit does not automatically load target instructions.
-- Allowed write scope; contracts; relevant evidence and already-verified results; applicable scoped authorizations.
+- Allowed write scope; contracts; relevant evidence and already-verified results, including facts already recorded in `project/`; applicable scoped authorizations.
 - Acceptance criteria; discovered verification commands and workdirs; preservation warning because others may have worked on the same files.
 - Assignment ID, predecessor, type, receipt path and exact granted tool allowlist.
 
@@ -36,9 +36,13 @@ Before launch, verify the completed handoff, profile and target instructions are
 
 The launch prompt is short: `Act as <role>. Read <absolute-profile> and <absolute-handoff>, then execute the assignment.` Do not paste prior conversations. The specialist performs only that assignment and writes the matching `-receipt.md`, never starts another coordination. Read-only roles may write that receipt only; they never edit targets. Their profiles intentionally rely on this instruction boundary and the existing runtime controls, rather than a blanket read-only mode that would also prohibit the receipt.
 
-Receipts contain `status` (`done`, `pending`, `needs_input`, `blocked`), `changed`, `checks` (command/workdir/actual result or skip), `evidence`, `risks`, `next` (action and owner), plus `profile_read` and `instructions_read` with absolute paths actually read. Clara adds `verdict`: `PASS`, `PASS_WITH_RISKS`, or `FAIL`. A review may finish with `status: done` and `verdict: FAIL`. Missing profile confirmation means loading unverified; a log or final chat answer is not a substitute for the receipt file.
+Receipts contain `status` (`done`, `pending`, `needs_input`, `blocked`), `changed`, `checks` (command/workdir/actual result or skip), `evidence`, `risks`, `next` (action and owner), plus `profile_read` and `instructions_read` with absolute paths actually read. Clara adds `verdict`: `PASS`, `PASS_WITH_RISKS`, or `FAIL`. Any role may add `promote_to_project_knowledge`: short sanitized facts that are stable for the project rather than the task; the specialist never writes to `project/` itself. A review may finish with `status: done` and `verdict: FAIL`. Missing profile confirmation means loading unverified; a log or final chat answer is not a substitute for the receipt file.
 
-Marina maintains `<kit_root>/.agent-state/<task>.md` for every task with assignments, including short ones. For each invocation record NN, platform, role, native session/ID, predecessor, type, exact allowlist, state, absolute handoff/receipt paths and result. Record the reservation before launch and the returned ID immediately afterward. Keep task decisions, scoped authorizations, Git evidence and next action; exclude secrets and full transcripts. Do not automatically archive or delete completed sessions.
+Marina maintains `<kit_root>/.agent-state/<project>/tasks/<task>/checkpoint.md` for every task with assignments, including short ones; task inputs (PDFs, attachments) stay in `tasks/<task>/inputs/`. For each invocation record NN, platform, role, native session/ID, predecessor, type, exact allowlist, state, absolute handoff/receipt paths and result. Record the reservation before launch and the returned ID immediately afterward. Keep task decisions, scoped authorizations, Git evidence and next action; exclude secrets and full transcripts. Do not automatically archive or delete completed sessions.
+
+## Project memory
+
+All generated state is grouped under `<kit_root>/.agent-state/<project>/`, where `<project>` is the slug of the target repository directory or, for multi-repository tasks, of the workspace directory grouping them. Beside `tasks/`, the optional `project/` directory holds stable project memory created on demand: `repositories.md` (absolute roots, base branches, discovered check commands, standing operational rules), `architecture.md`, `conventions.md` and `integrations.md` (Front–BFF–Gateway–API boundaries and current contracts). Only Marina writes there, by promoting `promote_to_project_knowledge` facts from receipts or her own verified discovery. She reads it at intake before rediscovering and points handoffs at what is already known; facts are reused where state has not changed and invalidated where it has. It follows the same sanitization rule as the checkpoint and stays out of Git with the rest of `.agent-state/`.
 
 Before writer N+1 starts, require writer N's final receipt, manager evidence that it has stopped working, and target Git status/diff checked and recorded in the checkpoint. `pending`, `needs_input` and `blocked` can close an assignment but never establish acceptance. Check other sessions with the same cwd and any shared target, including sessions launched from a different cwd. Unknown activity requires reconciliation. Writers are sequential across targets. Clara, Sofia and analista-redmine may overlap with other readers and role-free discovery, never an active writer in their target. Reviews inspect actual files/diffs, and Marina does not edit those targets during review. Receipt files have separate ownership and do not constitute concurrent target writers.
 
@@ -79,7 +83,7 @@ claude --bg --agent bruno \
   --settings '{"worktree":{"bgIsolation":"none"}}' \
   --permission-mode acceptEdits \
   --allowedTools "Bash(mvn test)" \
-  -- "Act as bruno. Read /absolute/kit/.claude/agents/bruno.md and /absolute/kit/.agent-state/redmine-1234/01-bruno-handoff.md, then execute."
+  -- "Act as bruno. Read /absolute/kit/.claude/agents/bruno.md and /absolute/kit/.agent-state/api/tasks/redmine-1234/01-bruno-handoff.md, then execute."
 ```
 
 The per-invocation setting `worktree.bgIsolation: none` allows background edits in the shared checkout, including receipt writes. Its default is `worktree`, which blocks Edit/Write until isolation is entered. This setting changes checkout isolation, not permission approvals; preserve the permission mode and scoped allowlist, and do not rewrite persistent user settings. If native policy prevents shared-checkout access, report that constraint and use the disclosed fallback after reconciling active sessions. See the [official setting reference](https://code.claude.com/docs/en/settings-reference#worktree-bgisolation).
