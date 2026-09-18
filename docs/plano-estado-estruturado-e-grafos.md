@@ -42,8 +42,8 @@ O que **não** muda: o julgamento (roteamento, mérito do receipt, decidir corre
 
 | Arquivo | Conteúdo | Quem escreve | Quem lê |
 |---|---|---|---|
-| `.agent-state/<task>/state.toml` | Estado do grafo: nós, arestas, estados, IDs nativos, caminhos, allowlists, eventos | Scripts (`state add`, `preflight`, `launch`, `status`, `receipt-lint`, `reconcile`) e a Marina para campos de julgamento (`accepted`/`returned`) | Scripts, Marina, Clara |
-| `.agent-state/<task>.md` | Diário: objetivo, critérios, decisões e seus motivos, autorizações com escopo, evidência narrativa, próximo passo | Marina | Marina, Clara, usuário |
+| `.agent-state/<project>/tasks/<task>/state.toml` | Estado do grafo: nós, arestas, estados, IDs nativos, caminhos, allowlists, eventos | Scripts (`state add`, `preflight`, `launch`, `status`, `receipt-lint`, `reconcile`) e a Marina para campos de julgamento (`accepted`/`returned`) | Scripts, Marina, Clara |
+| `.agent-state/<project>/tasks/<task>/checkpoint.md` | Diário: objetivo, critérios, decisões e seus motivos, autorizações com escopo, evidência narrativa, próximo passo | Marina | Marina, Clara, usuário |
 
 Regra de não duplicação: o diário **referencia** nós por `NN` e nunca repete campos do `state.toml`; o `state.toml` **nunca** contém motivos, decisões ou texto livre além de `note` curto por evento. Isso responde à pergunta 12.1 da análise (formato híbrido) sem criar uma terceira fonte de verdade: cada fato tem um único lugar.
 
@@ -54,17 +54,18 @@ Regra de não duplicação: o diário **referencia** nós por `NN` e nunca repet
 ### 2.3 Schema v0 (esboço)
 
 ```toml
-# .agent-state/<task>/state.toml — estado mecânico do grafo da tarefa.
+# .agent-state/<project>/tasks/<task>/state.toml — estado mecânico do grafo da tarefa.
 # Ignorado pelo Git. Nunca contém segredos, transcrições, env ou logs completos.
 schema = 1
 
 [task]
+project    = "github-copilot-fullstack-kit"     # ^[a-z0-9-]+$; ver plano-memoria-por-projeto.md
 slug       = "visible-sessions"                 # ^[a-z0-9-]+$
 title      = "Visible sessions kit update"
 phase      = "review"                            # ver G1
 kit_root   = "/mnt/dados/GitHub/github-copilot-fullstack-kit"
 targets    = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
-journal    = ".agent-state/visible-sessions.md"  # diário narrativo
+journal    = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/checkpoint.md"  # diário narrativo
 next_nn    = 3                                   # monotônico; nunca decresce; = max(nn) + 1 (nó 03 omitido do esboço)
 created_at = 2026-09-11T10:00:00-03:00
 updated_at = 2026-09-18T09:00:00-03:00
@@ -81,10 +82,10 @@ predecessor = 0                      # 0 = nenhum
 targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
 title       = "visible-sessions — node-backend — 01 — implementação"
 state       = "preparation_failed"   # ver G2 (terminal; NN consumido)
-handoff     = ".agent-state/visible-sessions/01-node-backend-handoff.md"
-receipt     = ".agent-state/visible-sessions/01-node-backend-receipt.md"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/01-node-backend-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/01-node-backend-receipt.md"
 git_before  = ""                     # não chegou a ser gravado
-allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-state/visible-sessions/fixture && node --test)"]
+allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/fixture && node --test)"]
 
   [assignments.native]
   platform      = "claude"           # claude | codex | unavailable
@@ -118,9 +119,9 @@ predecessor = 1
 targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
 title       = "visible-sessions — clara — 02 — revisão"
 state       = "accepted"
-handoff     = ".agent-state/visible-sessions/02-clara-handoff.md"
-receipt     = ".agent-state/visible-sessions/02-clara-receipt.md"
-git_before  = ".agent-state/visible-sessions/git-before-02.txt"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-clara-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-clara-receipt.md"
+git_before  = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/git-before-02.txt"
 allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
 
   [assignments.native]

@@ -76,11 +76,11 @@ Preservar o contrato atual do endpoint /v1/pacientes. Critério: testes existent
 ## Como uma tarefa é executada
 
 1. **Intake** — Marina consolida objetivo, critérios, decisões posteriores e evidência; distingue o que foi pedido, o que foi decidido depois, o que foi relatado como feito e o que foi verificado. Estado, percentual ou link de MR **não** provam conclusão.
-2. **Checkpoint** — Para toda tarefa com atribuições, Marina mantém `.agent-state/<tarefa>.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação.
+2. **Checkpoint** — Para toda tarefa com atribuições, Marina mantém `.agent-state/<projeto>/tasks/<tarefa>/checkpoint.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação. `<projeto>` é o slug do repositório-alvo ou, em tarefas com vários repositórios, do diretório de workspace que os agrupa; assim o estado de projetos diferentes nunca se mistura. Antes de redescobrir, Marina lê a memória estável em `.agent-state/<projeto>/project/` (repositórios, arquitetura, convenções, integrações), que só ela escreve. Anexos e PDFs da tarefa ficam em `tasks/<tarefa>/inputs/`.
 3. **Roteamento** — Uma correção simples vai para um único especialista. Sofia entra para decisões de arquitetura, contratos compartilhados, migrations e backfills; Clara revisa automaticamente autorização, contratos públicos, integridade de dados, migrations e operações críticas.
-4. **Handoff** — Antes de cada atribuição, Marina escreve `.agent-state/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência, critérios, checks descobertos e allowlist.
+4. **Handoff** — Antes de cada atribuição, Marina escreve `.agent-state/<projeto>/tasks/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência (inclusive o que já está em `project/`), critérios, checks descobertos e allowlist.
 5. **Sessão visível** — Cada implementação, revisão, correção ou análise abre uma sessão nova com título `<tarefa> — <papel> — <NN> — <tipo>`. Claude: `claude --bg --agent <papel>` com permissões por atribuição. Codex: `create_thread` no ambiente `local` do projeto. Nunca reutilizar, retomar ou bifurcar sessões concluídas.
-6. **Receipt** — O especialista escreve `<NN>-<papel>-receipt.md` com `status`, `changed`, `checks`, `evidence`, `risks`, `next`, mais `profile_read` e `instructions_read` (caminhos absolutos realmente lidos). Clara acrescenta `verdict` (`PASS`, `PASS_WITH_RISKS`, `FAIL`).
+6. **Receipt** — O especialista escreve `<NN>-<papel>-receipt.md` com `status`, `changed`, `checks`, `evidence`, `risks`, `next`, mais `profile_read` e `instructions_read` (caminhos absolutos realmente lidos). Clara acrescenta `verdict` (`PASS`, `PASS_WITH_RISKS`, `FAIL`). Qualquer papel pode listar `promote_to_project_knowledge` — fatos curtos e sanitizados que valem para o projeto, não só para a tarefa; Marina decide o que promover para `project/`, e nenhum especialista escreve lá.
 7. **Gate entre writers** — O próximo writer só é liberado com o receipt final do anterior, evidência do gerenciador nativo de que ele parou, e `git status/diff` do alvo conferido e registrado. Writers são sequenciais entre repositórios; leitores (Clara, Sofia, analista-redmine) podem sobrepor-se a outros leitores, nunca a um writer no mesmo alvo.
 8. **Correção** — Achados voltam ao **mesmo papel** em uma **nova** sessão. Falha repetida sem evidência nova exige novo diagnóstico, não uma alegação arbitrária de conclusão.
 9. **Consolidação** — Marina reporta evidência por critério de aceitação, resultado da revisão, riscos remanescentes e checks pulados.
@@ -133,7 +133,7 @@ Skills são procedimentos carregados sob demanda. No Claude Code, a Marina e os 
 - **Quando usar:** escopo incerto, histórico longo, vários repositórios ou retomada de uma tarefa interrompida. Uma tarefa limitada a um especialista pode ir direto ao papel.
 - **Exemplo:**
   ```text
-  /task-execution Retomar a tarefa #7976. Checkpoint em .agent-state/redmine-7976.md. Verificar o estado atual dos repositórios antes de qualquer nova sessão.
+  /task-execution Retomar a tarefa #7976. Checkpoint em .agent-state/agenda/tasks/redmine-7976/checkpoint.md. Verificar o estado atual dos repositórios antes de qualquer nova sessão.
   ```
 
 #### `quality-gate`
@@ -277,7 +277,7 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 - Releases governadas vão para Engineer/Tech Lead autorizados; provisionamento/restore PostgreSQL vai para DBA/Infraestrutura.
 - Normas oficiais podem ser fornecidas por projeto. Registre fonte e versão quando houver; norma ausente ou conflitante bloqueia apenas a decisão material que depende dela, não o restante do trabalho.
 - Nunca copie segredos, inventários de hosts ou mapas de infraestrutura interna para o kit.
-- Toda tarefa com atribuições mantém um checkpoint sanitizado e ignorado pelo Git em `.agent-state/`, inclusive tarefas curtas. Sessões concluídas ficam disponíveis para consulta; nunca são arquivadas ou apagadas automaticamente.
+- Toda tarefa com atribuições mantém um checkpoint sanitizado e ignorado pelo Git em `.agent-state/<projeto>/tasks/<tarefa>/`, inclusive tarefas curtas; a memória de projeto em `.agent-state/<projeto>/project/` segue a mesma sanitização. Sessões concluídas ficam disponíveis para consulta; nunca são arquivadas ou apagadas automaticamente.
 
 ## Eficiência e verificação
 

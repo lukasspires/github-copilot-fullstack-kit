@@ -1,8 +1,10 @@
 # Local task continuity; never commit task context.
+# Layout: .agent-state/<project>/project/ (stable memory) and .agent-state/<project>/tasks/<task>/ (checkpoint, handoffs, receipts, inputs/).
 .agent-state/
 Task #5231.pdf
 Task #5233.pdf
 Task #7976.pdf
 Task #8144.pdf
 Task #8145.pdf
+# Legacy: task inputs now live in .agent-state/<project>/tasks/<task>/inputs/.
 tmp/pdfs/*
