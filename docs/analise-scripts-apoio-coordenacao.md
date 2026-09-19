@@ -1,9 +1,9 @@
-# Análise: scripts auxiliares de apoio ao fluxo da Marina
+# Análise: scripts auxiliares de apoio ao fluxo da coordenadora
 
 - **Data:** 2026-09-16
 - **Branch analisada:** `feat/independent-visible-sessions` (HEAD `d18d37e`)
 - **Status:** proposta de avaliação; nenhum script foi implementado
-- **Escopo:** apoio, administração e controle do fluxo de tarefas coordenado pela Marina após a introdução de sessões visíveis independentes por atribuição
+- **Escopo:** apoio, administração e controle do fluxo de tarefas coordenado pela coordenadora após a introdução de sessões visíveis independentes por atribuição
 
 ## Sumário
 
@@ -24,7 +24,7 @@
 
 ## 1. Contexto e fontes analisadas
 
-Os commits `7b5b5ea` e `d18d37e` isolaram cada atribuição de especialista em uma sessão visível independente, com handoff, receipt e checkpoint obrigatórios. A Marina permanece na sessão principal como coordenadora e executa manualmente todas as etapas mecânicas do protocolo.
+Os commits `7b5b5ea` e `d18d37e` isolaram cada atribuição de especialista em uma sessão visível independente, com handoff, receipt e checkpoint obrigatórios. A coordenadora permanece na sessão principal e executa manualmente todas as etapas mecânicas do protocolo.
 
 Fontes lidas para esta análise:
 
@@ -32,11 +32,11 @@ Fontes lidas para esta análise:
 |---|---|
 | `AGENTS.md`, `CLAUDE.md` | Regras de coordenação, time, sessões independentes |
 | `docs/agent-workflow.md` | Procedimento por plataforma (Codex desktop, Claude CLI), gates, cenários de aceitação |
-| `.claude/skills/task-execution/SKILL.md` | Procedimento operacional da Marina (intake, roteamento, continuidade) |
-| `.claude/agents/marina.md`, `clara.md`, `bruno.md` | Ferramentas, modo de permissão e fronteiras por papel |
+| `.claude/skills/task-execution/SKILL.md` | Procedimento operacional da coordenadora (intake, roteamento, continuidade) |
+| `.claude/agents/coordinator.md`, `reviewer.md`, `java-backend.md` | Ferramentas, modo de permissão e fronteiras por papel |
 | `README.md` | Posicionamento do kit ("no permanent customization validator") |
 | `.agent-state/visible-sessions.md` | Checkpoint real da tarefa que implementou o fluxo |
-| `.agent-state/visible-sessions/02-clara-*.md`, `03-clara-*.md` | Handoffs e receipts reais de duas revisões independentes |
+| `.agent-state/visible-sessions/02-reviewer-*.md`, `03-reviewer-*.md` | Handoffs e receipts reais de duas revisões independentes |
 | `.agent-state/visible-sessions/git-before-0N.txt` | Snapshots de gate Git gravados manualmente |
 | `claude --version`, `claude agents --json --all` | Estado do runtime instalado (2.1.270) |
 
@@ -50,17 +50,17 @@ A evidência de execução (`.agent-state/`) é a fonte de maior peso: mostra on
 
 | Papel | Responsabilidade | Escreve em alvos |
 |---|---|---|
-| Marina | Intake, roteamento por risco, delegação sequencial, checkpoint, consolidação | Apenas docs/config gerais pequenas e checkpoints |
-| Alice, Bruno, Gustavo, Gabriel, Paula, node-backend, Diana | Implementação no escopo atribuído | Sim (write set do handoff) |
-| Sofia | Arquitetura, contratos compartilhados, migrations/backfills | Não (só o próprio receipt) |
-| Clara | Revisão independente por risco, com `verdict` | Não (só o próprio receipt) |
+| `coordinator` | Intake, roteamento por risco, delegação sequencial, checkpoint, consolidação | Apenas docs/config gerais pequenas e checkpoints |
+| `angular`, `java-backend`, `go-backend`, `go-etl`, `python-etl`, node-backend, `data-analyst` | Implementação no escopo atribuído | Sim (write set do handoff) |
+| `architect` | Arquitetura, contratos compartilhados, migrations/backfills | Não (só o próprio receipt) |
+| `reviewer` | Revisão independente por risco, com `verdict` | Não (só o próprio receipt) |
 | analista-redmine | Histórico complexo (opcional) | Não (só o próprio receipt) |
 
 ### 2.2 Ciclo de vida por atribuição (`NN`)
 
-Cada atribuição — implementação, revisão, correção ou análise — exige da Marina as etapas abaixo. A coluna **Natureza** distingue o que é decisão (julgamento) do que é procedimento repetível (mecânico), que é o candidato natural a script.
+Cada atribuição — implementação, revisão, correção ou análise — exige da coordenadora as etapas abaixo. A coluna **Natureza** distingue o que é decisão (julgamento) do que é procedimento repetível (mecânico), que é o candidato natural a script.
 
-| # | Etapa | O que a Marina faz hoje | Natureza |
+| # | Etapa | O que a coordenadora faz hoje | Natureza |
 |---|---|---|---|
 | 1 | Intake | Consolidar objetivo, critérios, evidência, decisões superadas; escolher papel por consequência | Julgamento |
 | 2 | Checkpoint | Manter `.agent-state/<task>.md` em prosa livre, ignorado pelo Git | Mecânico + julgamento |
@@ -71,14 +71,14 @@ Cada atribuição — implementação, revisão, correção ou análise — exig
 | 7 | Registro do ID | Capturar o ID curto/threadId e gravar imediatamente no checkpoint | Mecânico |
 | 8 | Monitoramento | `claude agents --json --all`, `claude logs <id>`; detectar `status: waiting` + `waitingFor: permission prompt` e reportar `claude attach <id>` ao usuário | Mecânico |
 | 9 | Gate de liberação do writer N+1 | Receipt final do predecessor existe; manager indica `done`/`stopped`/`failed`; `git status/diff` conferido contra o snapshot; nenhuma sessão desconhecida no mesmo cwd/alvo | **Mecânico** |
-| 10 | Leitura do receipt | Forma: `status`, `changed`, `checks`, `evidence`, `risks`, `next`, `profile_read`, `instructions_read`, `verdict` (Clara). Mérito: aceitar ou devolver | Mecânico (forma) + julgamento (mérito) |
-| 11 | Decisão seguinte | Correção → mesmo papel em nova sessão; revisão automática por risco → Clara; `needs_input` → nova atribuição após resposta | Julgamento |
+| 10 | Leitura do receipt | Forma: `status`, `changed`, `checks`, `evidence`, `risks`, `next`, `profile_read`, `instructions_read`, `verdict` (`reviewer`). Mérito: aceitar ou devolver | Mecânico (forma) + julgamento (mérito) |
+| 11 | Decisão seguinte | Correção → mesmo papel em nova sessão; revisão automática por risco → `reviewer`; `needs_input` → nova atribuição após resposta | Julgamento |
 | 12 | Retomada | Reconciliar checkpoint × manager × Git antes de criar qualquer sessão; nunca duplicar writer | Mecânico + julgamento |
 | 13 | Checks estáticos do kit | Parse TOML/YAML dos 11 perfis; paridade `.codex`/`.claude` normalizada; cópias `.agents/skills` ≡ `.claude/skills`; `git diff --check` | **Mecânico** (hoje ad hoc em Python) |
 
 ### 2.3 Regras invariantes que qualquer script deve respeitar
 
-- Marina nunca é executada em background nem delegada; scripts a apoiam, não a substituem.
+- A coordenadora nunca é executada em background nem delegada; scripts a apoiam, não a substituem.
 - Nenhum `bypassPermissions`, `--permission-prompts none`, ou resposta automática a aprovações nativas.
 - Nunca `--resume`, `--continue`, `--fork-session` para nova atribuição.
 - Writers são sequenciais entre repositórios; leitores podem sobrepor-se a leitores, nunca a um writer no mesmo alvo.
@@ -90,7 +90,7 @@ Cada atribuição — implementação, revisão, correção ou análise — exig
 
 ## 3. Evidência de execução real
 
-O checkpoint `.agent-state/visible-sessions.md` e os receipts da Clara registram falhas concretas do fluxo manual. Cada uma mapeia diretamente para um caso de uso de script.
+O checkpoint `.agent-state/visible-sessions.md` e os receipts do `reviewer` registram falhas concretas do fluxo manual. Cada uma mapeia diretamente para um caso de uso de script.
 
 | Ocorrência | Registro | Causa raiz | Caso de uso relacionado |
 |---|---|---|---|
@@ -115,7 +115,7 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 
 ### 4.1 `preflight` — gate de preparação
 
-- **Prioridade:** 1 (evidência direta: atribuição 01; recomendação da Clara)
+- **Prioridade:** 1 (evidência direta: atribuição 01; recomendação do `reviewer`)
 - **Plataforma:** neutra (arquivos + Git)
 - **Entradas:** slug da tarefa, `NN`, papel, `kit_root`, lista de `target_root`, lista de checks descobertos
 - **Verificações:**
@@ -172,7 +172,7 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 
 - **Prioridade:** 4
 - **Plataforma:** neutra
-- **Verificações:** campos obrigatórios presentes; `status` no enum; `verdict` presente e no enum quando papel é Clara; `profile_read` igual ao perfil do handoff; `instructions_read` com caminhos absolutos existentes; ausência de conteúdo que pareça segredo (heurística simples)
+- **Verificações:** campos obrigatórios presentes; `status` no enum; `verdict` presente e no enum quando papel é `reviewer`; `profile_read` igual ao perfil do handoff; `instructions_read` com caminhos absolutos existentes; ausência de conteúdo que pareça segredo (heurística simples)
 - **Não faz:** avaliar mérito, riscos ou evidência
 
 ### 4.6 `checkpoint add` / `next-nn` — entradas estruturadas
@@ -192,13 +192,13 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
   - `.agents/skills/**` byte-idêntico a `.claude/skills/**` (exceto `agents/openai.yaml`, que só existe no lado Codex)
   - `git diff --check`
   - opcional: links relativos em `docs/` e `README.md` resolvem
-- **Uso:** pela Marina antes de qualquer edição de kit; por Clara em revisões do próprio kit; futuramente em CI
+- **Uso:** pela coordenadora antes de qualquer edição de kit; pelo `reviewer` em revisões do próprio kit; futuramente em CI
 
 ### 4.8 `handoff new` — scaffold do template
 
 - **Prioridade:** 4
 - **Plataforma:** neutra
-- **Comportamento:** gera `<NN>-<role>-handoff.md` com todas as seções obrigatórias e placeholders; preenche automaticamente perfil absoluto, `kit_root`, receipt path e título; Marina completa o conteúdo de julgamento
+- **Comportamento:** gera `<NN>-<role>-handoff.md` com todas as seções obrigatórias e placeholders; preenche automaticamente perfil absoluto, `kit_root`, receipt path e título; a coordenadora completa o conteúdo de julgamento
 - **Benefício:** reduz omissões estruturais; não reduz o esforço de julgamento
 
 ### 4.9 `reconcile` — apoio à retomada
@@ -212,7 +212,7 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 
 | Script | Prioridade | Plataforma | Escreve | Cobre falha observada |
 |---|---|---|---|---|
-| `preflight` | 1 | neutra | `git-before-NN.txt`, checkpoint | 01, recomendação Clara |
+| `preflight` | 1 | neutra | `git-before-NN.txt`, checkpoint | 01, recomendação do `reviewer` |
 | `kit-lint` | 1 | neutra | nada | paridade ×2 |
 | `checkpoint add` / `next-nn` | 2 | neutra | checkpoint | prosa livre |
 | `gate` | 2 | neutra + Claude | nada | — (preventivo) |
@@ -235,7 +235,7 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 | Criar threads Codex | Via MCP na sessão, não shell |
 | Arquivar/apagar sessões | Proibido pelo protocolo |
 | Editar alvos, fazer commit, push, MR, Redmine, deploy | Fora da entrega local; exige autorização própria |
-| Lançar automaticamente o writer N+1 após `gate` | Erode o humano-no-loop; script propõe, Marina lança |
+| Lançar automaticamente o writer N+1 após `gate` | Erode o humano-no-loop; script propõe, a coordenadora lança |
 | Reescrever `settings.json` do usuário | O kit evita deliberadamente; ver seção 8 |
 
 ---
@@ -243,8 +243,8 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 ## 6. Benefícios
 
 1. **Disciplina vira código de saída.** Os receipts 02 e 03 apontam três riscos "instruction-level" (gate de preparação, isolamento de worktree, fronteira de escrita). `preflight` e `launch` tornam os dois primeiros verificáveis mecanicamente; a atribuição 01 não teria sido lançada.
-2. **Evidência reproduzível.** Snapshots `git-before-NN.txt` e entradas de checkpoint com formato fixo tornam retomada e revisão comparáveis entre tarefas e legíveis por Clara sem interpretação.
-3. **Menos boilerplate na sessão principal.** O comando de lançamento tem sete flags com semântica de segurança; esquecer uma custou uma sessão inteira (02). Menos contexto da Marina gasto em `jq`/`grep` manuais e mais em julgamento.
+2. **Evidência reproduzível.** Snapshots `git-before-NN.txt` e entradas de checkpoint com formato fixo tornam retomada e revisão comparáveis entre tarefas e legíveis pelo `reviewer` sem interpretação.
+3. **Menos boilerplate na sessão principal.** O comando de lançamento tem sete flags com semântica de segurança; esquecer uma custou uma sessão inteira (02). Menos contexto da coordenadora gasto em `jq`/`grep` manuais e mais em julgamento.
 4. **Fragilidade de plataforma encapsulada.** O consumo de `claude agents --json` fica em um lugar só, com validação de schema, em vez de espalhado em prosa e reexecutado a cada tarefa.
 5. **Consolidação de checks já existentes.** `kit-lint` substitui asserções Python reescritas (e erradas) em cada rodada por um único validador testado.
 6. **Base para CI futura.** `kit-lint` e `receipt-lint` são executáveis sem runtime de agente, logo podem rodar em pipeline.
@@ -261,15 +261,15 @@ O kit já mantém paridade `.codex` ↔ `.claude`. Scripts criam um terceiro lug
 
 ### 7.2 Falsa sensação de enforcement
 
-`preflight` verifica arquivos; não sandboxa nada. A fronteira "Clara só escreve o receipt" continua sendo instrução (`clara.md`: "this profile does not enforce a filesystem sandbox").
+`preflight` verifica arquivos; não sandboxa nada. A fronteira "`reviewer` só escreve o receipt" continua sendo instrução (`reviewer.md`: "this profile does not enforce a filesystem sandbox").
 
-- **Mitigação:** documentação e saída dos scripts nunca usam linguagem de "controle de permissão"; o receipt da Clara continua obrigado a explicitar o limite.
+- **Mitigação:** documentação e saída dos scripts nunca usam linguagem de "controle de permissão"; o receipt do `reviewer` continua obrigado a explicitar o limite.
 
 ### 7.3 Allowlist como caminho privilegiado
 
-Para a Marina rodar `scripts/launch` sem prompt, algo como `Bash(scripts/*)` entra na allowlist; a partir daí, tudo que o script faz está pré-aprovado.
+Para a coordenadora rodar `scripts/launch` sem prompt, algo como `Bash(scripts/*)` entra na allowlist; a partir daí, tudo que o script faz está pré-aprovado.
 
-- **Mitigação:** scripts finos e auditáveis — sem rede, sem mutação Git além de leitura/snapshot, sem escrita fora de `.agent-state/`, sem responder aprovações, sem encadear lançamentos. Revisão da Clara obrigatória para qualquer alteração em `scripts/`.
+- **Mitigação:** scripts finos e auditáveis — sem rede, sem mutação Git além de leitura/snapshot, sem escrita fora de `.agent-state/`, sem responder aprovações, sem encadear lançamentos. Revisão do `reviewer` obrigatória para qualquer alteração em `scripts/`.
 
 ### 7.4 Assimetria de plataforma
 
@@ -299,13 +299,13 @@ O kit não tem testes; scripts sem testes viram mais um artefato de "currency n�
 
 `checkpoint add` altera o formato do checkpoint descrito em três documentos; `kit-lint` contradiz a frase do README sobre ausência de validador.
 
-- **Mitigação:** tratar como mudança de contrato com revisão da Clara; ver seção 11.
+- **Mitigação:** tratar como mudança de contrato com revisão do `reviewer`; ver seção 11.
 
 ### 7.9 Sobre-automação e perda do humano-no-loop
 
 Um `watch` que lança o próximo writer ao detectar `done` transformaria o fluxo em pipeline autônomo, contrariando o design.
 
-- **Mitigação:** regra fixa — scripts propõem, Marina decide e executa cada lançamento; `watch` termina ao detectar transição, não age.
+- **Mitigação:** regra fixa — scripts propõem, a coordenadora decide e executa cada lançamento; `watch` termina ao detectar transição, não age.
 
 ### 7.10 Sanitização
 
@@ -330,7 +330,7 @@ Scripts que escrevem em `.agent-state/` podem vazar ambiente, transcrições ou 
 
 ## 8. Alternativa: hooks nativos como enforcement
 
-Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da sessão), casando o comando `claude --bg*` no tool `Bash` e executando `preflight`, transformaria o gate em enforcement do runtime: a Marina não conseguiria lançar sem o gate passar, independentemente de lembrar de chamá-lo.
+Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da sessão), casando o comando `claude --bg*` no tool `Bash` e executando `preflight`, transformaria o gate em enforcement do runtime: a coordenadora não conseguiria lançar sem o gate passar, independentemente de lembrar de chamá-lo.
 
 **A favor**
 
@@ -353,11 +353,11 @@ Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da se
 ### Etapa 1 — neutros e de maior evidência
 
 - `kit-lint` (consolida checks já executados)
-- `preflight` (cobre a falha 01 e a recomendação da Clara)
+- `preflight` (cobre a falha 01 e a recomendação do `reviewer`)
 - formato estruturado de checkpoint + `checkpoint add` / `next-nn` (pré-requisito de `gate`)
 - testes mínimos com fixture
 - atualização documental (seção 11)
-- revisão independente da Clara sobre `scripts/` e o novo contrato de checkpoint
+- revisão independente do `reviewer` sobre `scripts/` e o novo contrato de checkpoint
 
 ### Etapa 2 — adaptadores Claude
 
@@ -377,7 +377,7 @@ Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da se
 
 - Uma cadeia real de quatro atribuições em Claude executada com `preflight`/`gate`/`launch` sem lançamento após preparação falha e sem flag esquecida.
 - `kit-lint` verde no kit atual e vermelho em uma quebra de paridade introduzida de propósito (teste).
-- Receipt da Clara `PASS` ou `PASS_WITH_RISKS` sobre `scripts/`, com os riscos 7.2 e 7.3 explicitamente avaliados.
+- Receipt do `reviewer` `PASS` ou `PASS_WITH_RISKS` sobre `scripts/`, com os riscos 7.2 e 7.3 explicitamente avaliados.
 
 ---
 
@@ -396,12 +396,12 @@ Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da se
 | Aprovações | nunca responder; apenas imprimir `claude attach <id>` |
 | Lançamento | um por invocação, explícito; nunca encadear N+1 |
 | Flags proibidas | `bypassPermissions`, `--permission-prompts none`, `--resume`, `--continue`, `--fork-session`, allowlist ampla |
-| Saída | legível para humano e Marina; código de saída significativo; `--json` opcional |
+| Saída | legível para humano e a coordenadora; código de saída significativo; `--json` opcional |
 | Schema do manager | validado; falha ruidosa em divergência |
 | Versão mínima do CLI | declarada no cabeçalho; checada por `kit-lint` |
 | Sanitização | campos enumerados; sem dump de ambiente ou logs completos |
 | Testes | `unittest` com fixture; executados por `kit-lint` |
-| Revisão | qualquer alteração em `scripts/` passa por Clara |
+| Revisão | qualquer alteração em `scripts/` passa pelo `reviewer` |
 
 ---
 
@@ -414,17 +414,17 @@ Um hook `PreToolUse` em `<kit_root>/.claude/settings.json` (projeto = raiz da se
 | `CLAUDE.md` | Referenciar `launch-claude`/`status-claude` no lugar da lista de flags (mantendo a lista como documentação) |
 | `docs/agent-workflow.md` | Substituir a checklist manual do gate pela chamada ao script; documentar o formato estruturado do checkpoint; atualizar versão do CLI |
 | `.claude/skills/task-execution/SKILL.md` e `.agents/skills/task-execution/SKILL.md` | Mesmas mudanças, mantendo cópias idênticas |
-| `.claude/agents/marina.md` e `.codex/agents/marina.toml` | Instruir uso dos scripts antes de qualquer lançamento; sem alterar `tools`/`permissionMode` |
+| `.claude/agents/coordinator.md` e `.codex/agents/coordinator.toml` | Instruir uso dos scripts antes de qualquer lançamento; sem alterar `tools`/`permissionMode` |
 | `.gitignore` | Sem mudança (scripts versionados; `.agent-state/` continua ignorado) |
 
-Toda alteração acima é de contrato do kit e deve passar pelo fluxo normal: handoff, sessão visível da Clara, receipt.
+Toda alteração acima é de contrato do kit e deve passar pelo fluxo normal: handoff, sessão visível do `reviewer`, receipt.
 
 ---
 
 ## 12. Perguntas em aberto
 
 1. O checkpoint deve migrar para um formato totalmente estruturado (YAML/JSON) ou manter prosa com um bloco estruturado por atribuição? A segunda opção preserva legibilidade humana; a primeira simplifica `gate`/`reconcile`.
-2. `scripts/` deve cobrir também a verificação de `create_thread`/`wait_threads` do Codex por meio de arquivos intermediários gravados pela Marina, ou o lado Codex permanece 100% manual?
+2. `scripts/` deve cobrir também a verificação de `create_thread`/`wait_threads` do Codex por meio de arquivos intermediários gravados pela coordenadora, ou o lado Codex permanece 100% manual?
 3. Há intenção de adotar `settings.json` de projeto no kit (pré-requisito para hooks)? A decisão muda a postura documentada de "não reescrever settings".
 4. Qual a política de versão mínima do CLI: pinar e falhar, ou avisar e prosseguir?
 5. Os testes dos scripts devem usar a fixture já existente em `.agent-state/` (ignorada pelo Git) ou uma fixture versionada em `tests/`?

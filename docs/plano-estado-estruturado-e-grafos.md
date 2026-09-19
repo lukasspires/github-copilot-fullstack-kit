@@ -1,9 +1,9 @@
-# Plano: estado estruturado e grafos do fluxo da Marina
+# Plano: estado estruturado e grafos do fluxo da coordenadora
 
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `5abaed8`)
 - **Status:** planejamento; nenhum script, schema definitivo ou alteração de contrato implementados
-- **Base:** [`analise-scripts-apoio-marina.md`](analise-scripts-apoio-marina.md) (seções 4, 9, 10 e 12)
+- **Base:** [`analise-scripts-apoio-coordenacao.md`](analise-scripts-apoio-coordenacao.md) (seções 4, 9, 10 e 12)
 - **Escopo:** definir o estado estruturado de uma tarefa como estado de um grafo, planejar os grafos e loops do fluxo, e reordenar o roteiro da análise a partir desse modelo
 
 ## Sumário
@@ -28,11 +28,11 @@ A análise catalogou nove scripts como utilitários independentes (`preflight`, 
 
 Três consequências práticas:
 
-- O checkpoint deixa de ser um diário em prosa que a Marina reinterpreta a cada retomada e passa a ser o **estado persistido** do grafo — retomada é "ler o estado, achar o último nó, ver quais arestas estão habilitadas".
+- O checkpoint deixa de ser um diário em prosa que a coordenadora reinterpreta a cada retomada e passa a ser o **estado persistido** do grafo — retomada é "ler o estado, achar o último nó, ver quais arestas estão habilitadas".
 - As invariantes do protocolo (writer único, leitores sobrepõem só leitores, `NN` nunca reutilizado, nenhuma delegação recursiva) viram **validações sobre arestas**, verificáveis antes de lançar, em vez de itens de uma lista que a coordenadora precisa lembrar.
 - Os ciclos do fluxo (correção ↔ revisão, monitoramento, clarificação, reconciliação) ganham **condição de parada explícita baseada em progresso**, não em contador — formalizando a regra existente "repeated failure without new evidence requires a fresh diagnosis".
 
-O que **não** muda: o julgamento (roteamento, mérito do receipt, decidir correção × revisão × `needs_input`) continua na Marina; aprovações nativas continuam no humano via `claude attach`; nenhum lançamento é encadeado automaticamente. O grafo cuida do mecânico; a prosa continua sendo a fonte de verdade para o julgamento (análise, seção 5).
+O que **não** muda: o julgamento (roteamento, mérito do receipt, decidir correção × revisão × `needs_input`) continua na coordenadora; aprovações nativas continuam no humano via `claude attach`; nenhum lançamento é encadeado automaticamente. O grafo cuida do mecânico; a prosa continua sendo a fonte de verdade para o julgamento (análise, seção 5).
 
 ---
 
@@ -42,8 +42,8 @@ O que **não** muda: o julgamento (roteamento, mérito do receipt, decidir corre
 
 | Arquivo | Conteúdo | Quem escreve | Quem lê |
 |---|---|---|---|
-| `.agent-state/<project>/tasks/<task>/state.toml` | Estado do grafo: nós, arestas, estados, IDs nativos, caminhos, allowlists, eventos | Scripts (`state add`, `preflight`, `launch`, `status`, `receipt-lint`, `reconcile`) e a Marina para campos de julgamento (`accepted`/`returned`) | Scripts, Marina, Clara |
-| `.agent-state/<project>/tasks/<task>/checkpoint.md` | Diário: objetivo, critérios, decisões e seus motivos, autorizações com escopo, evidência narrativa, próximo passo | Marina | Marina, Clara, usuário |
+| `.agent-state/<project>/tasks/<task>/state.toml` | Estado do grafo: nós, arestas, estados, IDs nativos, caminhos, allowlists, eventos | Scripts (`state add`, `preflight`, `launch`, `status`, `receipt-lint`, `reconcile`) e a coordenadora para campos de julgamento (`accepted`/`returned`) | Scripts, a coordenadora, `reviewer` |
+| `.agent-state/<project>/tasks/<task>/checkpoint.md` | Diário: objetivo, critérios, decisões e seus motivos, autorizações com escopo, evidência narrativa, próximo passo | A coordenadora | A coordenadora, `reviewer`, usuário |
 
 Regra de não duplicação: o diário **referencia** nós por `NN` e nunca repete campos do `state.toml`; o `state.toml` **nunca** contém motivos, decisões ou texto livre além de `note` curto por evento. Isso responde à pergunta 12.1 da análise (formato híbrido) sem criar uma terceira fonte de verdade: cada fato tem um único lugar.
 
@@ -99,7 +99,7 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
   at   = 2026-09-11T11:00:00-03:00
   from = ""
   to   = "reserved"
-  by   = "marina"                    # marina | user | preflight | launch | status | gate | receipt-lint | reconcile
+  by   = "coordinator"                    # coordinator | user | preflight | launch | status | gate | receipt-lint | reconcile
   note = ""
 
   [[assignments.events]]
@@ -111,16 +111,16 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
 
 [[assignments]]
 nn          = 2
-role        = "clara"
+role        = "reviewer"
 type        = "revisão"
 mode        = "reader"
 edge        = "revisa"
 predecessor = 1
 targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
-title       = "visible-sessions — clara — 02 — revisão"
+title       = "visible-sessions — reviewer — 02 — revisão"
 state       = "accepted"
-handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-clara-handoff.md"
-receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-clara-receipt.md"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-reviewer-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-reviewer-receipt.md"
 git_before  = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/git-before-02.txt"
 allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
 
@@ -135,7 +135,7 @@ allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
   # Preenchido por receipt-lint a partir do receipt; só campos enumerados.
   [assignments.receipt_summary]
   status       = "done"              # done | pending | needs_input | blocked
-  verdict      = "PASS_WITH_RISKS"   # Clara: PASS | PASS_WITH_RISKS | FAIL; demais: ""
+  verdict      = "PASS_WITH_RISKS"   # `reviewer`: PASS | PASS_WITH_RISKS | FAIL; demais: ""
   profile_ok   = true                # profile_read == perfil do handoff
   risks_digest = [                   # títulos curtos normalizados; base do predicado de progresso (6.1)
     "preparation gate depends on coordinator discipline",
@@ -156,12 +156,12 @@ allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
 
 | Campo | Origem | Observação |
 |---|---|---|
-| `nn`, `role`, `type`, `edge`, `predecessor`, `targets`, `allowlist` | Marina (julgamento) via `state add` | Reserva do nó; `next_nn` incrementa |
-| `mode` | Derivado do papel | Sofia, Clara, analista-redmine = `reader`; demais = `writer` |
+| `nn`, `role`, `type`, `edge`, `predecessor`, `targets`, `allowlist` | A coordenadora (julgamento) via `state add` | Reserva do nó; `next_nn` incrementa |
+| `mode` | Derivado do papel | `architect`, `reviewer`, analista-redmine = `reader`; demais = `writer` |
 | `title`, `handoff`, `receipt`, `git_before` | Derivados por convenção | Nunca digitados |
 | `state`, `events[]` | Transições (G2) | Append-only; `state` é sempre o `to` do último evento |
-| `native.*` | `launch` (Claude) / Marina (Codex, fallback) / `status` | `platform = "unavailable"` exige `reason` — é a divulgação "delegação visível indisponível" em forma estruturada |
-| `receipt_summary.*` | `receipt-lint` | Só forma; mérito continua na Marina |
+| `native.*` | `launch` (Claude) / a coordenadora (Codex, fallback) / `status` | `platform = "unavailable"` exige `reason` — é a divulgação "delegação visível indisponível" em forma estruturada |
+| `receipt_summary.*` | `receipt-lint` | Só forma; mérito continua na coordenadora |
 
 O que fica **fora** do `state.toml`: motivos de roteamento, autorizações e seus escopos, evidência por critério de aceitação, decisões superadas. Tudo isso permanece no diário, que continua obrigatório.
 
@@ -192,27 +192,27 @@ flowchart LR
 
 | Fase | Nós ativos permitidos | Quem decide a saída |
 |---|---|---|
-| `intake` | nenhum | Marina |
-| `discovery` | `Agent(Explore)` role-free; `analista-redmine`; leitores em paralelo | Marina |
-| `architecture` | Sofia (`reader`) | Marina, com receipt de Sofia |
-| `implementation` | exatamente um `writer` | gate + Marina |
-| `review` | Clara (`reader`); nenhum `writer`; Marina não edita o alvo | Marina, com `verdict` |
-| `correction` | exatamente um `writer` (mesmo papel do nó devolvido) | gate + Marina |
+| `intake` | nenhum | A coordenadora |
+| `discovery` | `Agent(Explore)` role-free; `analista-redmine`; leitores em paralelo | A coordenadora |
+| `architecture` | `architect` (`reader`) | A coordenadora, com receipt do `architect` |
+| `implementation` | exatamente um `writer` | gate + a coordenadora |
+| `review` | `reviewer` (`reader`); nenhum `writer`; a coordenadora não edita o alvo | A coordenadora, com `verdict` |
+| `correction` | exatamente um `writer` (mesmo papel do nó devolvido) | gate + a coordenadora |
 | `waiting_input` | nenhum | usuário |
 | `blocked` | nenhum | usuário / externo |
-| `delivery` | nenhum | Marina consolida |
+| `delivery` | nenhum | A coordenadora consolida |
 
-A transição `implementation → delivery` sem revisão é válida apenas quando nenhum gatilho automático de Clara se aplica (autorização, contrato público, integridade de dados, migração, operação crítica) e o usuário não pediu revisão. Isso é julgamento; o grafo apenas registra qual aresta foi tomada.
+A transição `implementation → delivery` sem revisão é válida apenas quando nenhum gatilho automático do `reviewer` se aplica (autorização, contrato público, integridade de dados, migração, operação crítica) e o usuário não pediu revisão. Isso é julgamento; o grafo apenas registra qual aresta foi tomada.
 
 ---
 
 ## 4. G2 — máquina de estados de uma atribuição
 
-Estados do campo `assignments[].state`. Cada transição tem um agente responsável (`by`) e um predicado. Nenhuma transição é automática entre nós distintos — G2 termina no fechamento do nó; abrir o próximo é uma aresta de G3 decidida pela Marina.
+Estados do campo `assignments[].state`. Cada transição tem um agente responsável (`by`) e um predicado. Nenhuma transição é automática entre nós distintos — G2 termina no fechamento do nó; abrir o próximo é uma aresta de G3 decidida pela coordenadora.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> reserved: state add (Marina)
+  [*] --> reserved: state add (a coordenadora)
   reserved --> prepared: preflight PASS
   reserved --> preparation_failed: preflight FAIL
   prepared --> launched: launch, ID capturado
@@ -228,8 +228,8 @@ stateDiagram-v2
   finished --> receipt_missing: manager terminal sem receipt
   receipt_received --> receipt_validated: receipt-lint PASS
   receipt_received --> receipt_invalid: receipt-lint FAIL
-  receipt_validated --> accepted: Marina, mérito aceito
-  receipt_validated --> returned: Marina, devolver
+  receipt_validated --> accepted: a coordenadora, mérito aceito
+  receipt_validated --> returned: a coordenadora, devolver
   receipt_validated --> closed_needs_input: status needs_input
   receipt_validated --> closed_blocked: status blocked
   receipt_validated --> closed_pending: status pending
@@ -248,11 +248,11 @@ stateDiagram-v2
 
 | De | Para | Predicado | `by` | Escreve |
 |---|---|---|---|---|
-| — | `reserved` | Marina escolheu papel/tipo/aresta; `nn = next_nn` | `marina` (via `state add`) | `state.toml` |
+| — | `reserved` | A coordenadora escolheu papel/tipo/aresta; `nn = next_nn` | `coordinator` (via `state add`) | `state.toml` |
 | `reserved` | `prepared` | Todas as verificações 4.1 da análise passam; `git-before-NN.txt` gravado | `preflight` | `git-before-NN.txt`, evento |
 | `reserved` | `preparation_failed` | Qualquer verificação falha | `preflight` | evento com `note` = primeira falha |
-| `prepared` | `launched` | Comando emitido **e** ID capturado | `launch` (Claude) / `marina` (Codex, após `create_thread`) | `native.*`, evento |
-| `prepared` | `uncertain` | Comando emitido sem ID confirmado (timeout, erro de parse, `clientThreadId` apenas) | `launch` / `marina` | evento |
+| `prepared` | `launched` | Comando emitido **e** ID capturado | `launch` (Claude) / `coordinator` (Codex, após `create_thread`) | `native.*`, evento |
+| `prepared` | `uncertain` | Comando emitido sem ID confirmado (timeout, erro de parse, `clientThreadId` apenas) | `launch` / `coordinator` | evento |
 | `uncertain` | `launched` | Sessão encontrada no manager por título + cwd + janela de tempo | `reconcile` | `native.id`, evento |
 | `uncertain` | `abandoned` | Manager não tem sessão compatível após reconciliação | `reconcile` | evento |
 | `launched` | `working` / `waiting_approval` / `finished` | Observação do manager (`claude agents --json --all` / `wait_threads`) | `status` | `native.last_seen*`, evento |
@@ -261,9 +261,9 @@ stateDiagram-v2
 | `finished` | `receipt_missing` | Manager terminal, receipt ausente após janela de espera | `gate` | evento |
 | `receipt_received` | `receipt_validated` | Campos obrigatórios, enums, `profile_read` ≡ perfil, caminhos existem, sem heurística de segredo | `receipt-lint` | `receipt_summary.*`, evento |
 | `receipt_received` | `receipt_invalid` | `receipt-lint` FAIL | `receipt-lint` | evento com `note` |
-| `receipt_validated` | `accepted` | Marina aceita o mérito; exige `status = done` e, para Clara, `verdict ≠ FAIL` | `marina` | evento |
-| `receipt_validated` | `returned` | Marina devolve (findings da Clara, ou implementação insuficiente) | `marina` | evento |
-| `receipt_validated` | `closed_needs_input` / `closed_blocked` / `closed_pending` | Espelha `receipt_summary.status` | `marina` | evento |
+| `receipt_validated` | `accepted` | A coordenadora aceita o mérito; exige `status = done` e, para `reviewer`, `verdict ≠ FAIL` | `coordinator` | evento |
+| `receipt_validated` | `returned` | A coordenadora devolve (findings do `reviewer`, ou implementação insuficiente) | `coordinator` | evento |
+| `receipt_validated` | `closed_needs_input` / `closed_blocked` / `closed_pending` | Espelha `receipt_summary.status` | `coordinator` | evento |
 
 ### 4.2 Propriedades
 
@@ -277,14 +277,14 @@ stateDiagram-v2
 
 ## 5. G3 — grafo de dependência entre atribuições
 
-Cada nó tem exatamente um `predecessor` (0 para o primeiro) e uma `edge` que nomeia **por que** foi criado. A aresta é escolhida pela Marina; o predicado que a habilita é verificado por `gate`.
+Cada nó tem exatamente um `predecessor` (0 para o primeiro) e uma `edge` que nomeia **por que** foi criado. A aresta é escolhida pela coordenadora; o predicado que a habilita é verificado por `gate`.
 
 | `edge` | De (predecessor) | Para (novo nó) | Quando | Predicado de `gate` |
 |---|---|---|---|---|
 | `inicia` | nenhum | `writer` ou `reader` | Primeira atribuição da tarefa | P0 |
-| `revisa` | `writer` em `accepted`/`closed_pending` | Clara (`reader`) | Gatilho automático ou pedido explícito | P0 + P_reader |
-| `analisa` | qualquer fechado, ou nenhum | Sofia / analista-redmine / Diana / mesmo papel com `type = análise` | Decisão material, histórico, ou loop sem progresso (6.1) | P0 + P_reader (ou P_writer se o papel escreve) |
-| `corrige` | Clara em `accepted` com `verdict = FAIL` | mesmo papel do writer revisado, `type = correção` | Findings a corrigir | P0 + P_writer + P_progresso (6.1) |
+| `revisa` | `writer` em `accepted`/`closed_pending` | `reviewer` (`reader`) | Gatilho automático ou pedido explícito | P0 + P_reader |
+| `analisa` | qualquer fechado, ou nenhum | `architect` / analista-redmine / `data-analyst` / mesmo papel com `type = análise` | Decisão material, histórico, ou loop sem progresso (6.1) | P0 + P_reader (ou P_writer se o papel escreve) |
+| `corrige` | `reviewer` em `accepted` com `verdict = FAIL` | mesmo papel do writer revisado, `type = correção` | Findings a corrigir | P0 + P_writer + P_progresso (6.1) |
 | `continua` | `closed_needs_input` (após resposta) / `closed_pending` | mesmo papel, mesmo `type` do predecessor | Trabalho restante ou resposta do usuário | P0 + P_writer/P_reader conforme `mode` |
 | `substitui` | `preparation_failed` / `abandoned` / `receipt_missing` / `receipt_invalid` | mesmo papel, mesmo `type` | Nó fechou sem produzir resultado | P0 + P_writer/P_reader; **exige** que o predecessor esteja em terminal reconciliado |
 
@@ -310,18 +310,18 @@ Invariantes verificadas por `state-lint` (parte de `kit-lint`, sobre a fixture e
 
 ## 6. Loops e condições de parada
 
-### 6.1 Loop de correção — `writer → Clara → FAIL → corrige → Clara …`
+### 6.1 Loop de correção — `writer → reviewer → FAIL → corrige → reviewer …`
 
-Continua enquanto Clara devolve `FAIL` **com findings novos**. Termina por:
+Continua enquanto o `reviewer` devolve `FAIL` **com findings novos**. Termina por:
 
 | Condição | Aresta seguinte | Quem decide |
 |---|---|---|
-| `verdict ∈ {PASS, PASS_WITH_RISKS}` | fase `delivery` | Marina |
-| `status ∈ {needs_input, blocked}` em qualquer nó | `continua` após o usuário | usuário → Marina |
-| **Sem progresso:** `risks_digest` da revisão *k* tem interseção substancial com o da revisão *k−1* (mesmos títulos normalizados) | `analisa` (mesmo papel com `type = análise`, ou Sofia), **não** `corrige` | `gate` recusa `corrige`; Marina escolhe o destino da análise |
-| Segundo `FAIL` consecutivo na mesma cadeia, mesmo com findings distintos | `corrige` permitido **somente após** decisão do usuário registrada no diário | Marina pergunta; usuário decide |
+| `verdict ∈ {PASS, PASS_WITH_RISKS}` | fase `delivery` | A coordenadora |
+| `status ∈ {needs_input, blocked}` em qualquer nó | `continua` após o usuário | usuário → a coordenadora |
+| **Sem progresso:** `risks_digest` da revisão *k* tem interseção substancial com o da revisão *k−1* (mesmos títulos normalizados) | `analisa` (mesmo papel com `type = análise`, ou `architect`), **não** `corrige` | `gate` recusa `corrige`; a coordenadora escolhe o destino da análise |
+| Segundo `FAIL` consecutivo na mesma cadeia, mesmo com findings distintos | `corrige` permitido **somente após** decisão do usuário registrada no diário | A coordenadora pergunta; usuário decide |
 
-O predicado **P_progresso** é a formalização de "repeated failure without new evidence requires a fresh diagnosis, not an arbitrary completion claim". Não é um contador: uma cadeia pode ter cinco correções se cada uma resolve findings distintos. A quarta linha é um ponto de humano-no-loop, não um limite — evita que a Marina insista sozinha em um ciclo caro.
+O predicado **P_progresso** é a formalização de "repeated failure without new evidence requires a fresh diagnosis, not an arbitrary completion claim". Não é um contador: uma cadeia pode ter cinco correções se cada uma resolve findings distintos. A quarta linha é um ponto de humano-no-loop, não um limite — evita que a coordenadora insista sozinha em um ciclo caro.
 
 O `risks_digest` é a única entrada mecânica do predicado; sua qualidade depende de `receipt-lint` extrair títulos de risco de forma estável. Se a heurística for fraca, o predicado degrada para "sempre pedir decisão ao usuário no segundo FAIL", que ainda é seguro.
 
@@ -335,11 +335,11 @@ repetir a cada <intervalo> até <duração máxima>:
 SAIR por tempo esgotado com o último estado observado
 ```
 
-Termina ao **observar** uma transição; nunca a **provoca**. Intervalo e duração são argumentos obrigatórios (sem padrão infinito). Na sessão principal, o equivalente nativo é `/loop` ou `ScheduleWakeup` com intervalo compatível com a duração esperada da atribuição; a Marina decide o que fazer ao acordar.
+Termina ao **observar** uma transição; nunca a **provoca**. Intervalo e duração são argumentos obrigatórios (sem padrão infinito). Na sessão principal, o equivalente nativo é `/loop` ou `ScheduleWakeup` com intervalo compatível com a duração esperada da atribuição; a coordenadora decide o que fazer ao acordar.
 
 ### 6.3 Loop de clarificação — `needs_input`
 
-`closed_needs_input` → usuário responde (fora do grafo) → Marina cria nó `continua` com handoff atualizado → G2 do zero. Termina quando o nó sucessor fecha em qualquer outro estado. Não há limite: cada volta é uma decisão explícita do usuário.
+`closed_needs_input` → usuário responde (fora do grafo) → a coordenadora cria nó `continua` com handoff atualizado → G2 do zero. Termina quando o nó sucessor fecha em qualquer outro estado. Não há limite: cada volta é uma decisão explícita do usuário.
 
 ### 6.4 Loop de reconciliação — retomada
 
@@ -353,7 +353,7 @@ para cada sessão no manager com prefixo "<task> —" sem nó correspondente:
 repetir até nenhuma mudança OU lista de não reconciliados estável
 ```
 
-Termina quando o estado é ponto fixo. Se restar algo não reconciliado, **somente** as arestas dependentes daquele nó ficam bloqueadas; o resto da tarefa pode prosseguir. `reconcile` propõe; a Marina registra a decisão.
+Termina quando o estado é ponto fixo. Se restar algo não reconciliado, **somente** as arestas dependentes daquele nó ficam bloqueadas; o resto da tarefa pode prosseguir. `reconcile` propõe; a coordenadora registra a decisão.
 
 ---
 
@@ -373,9 +373,9 @@ Mapeamento dos casos de uso da análise (seção 4) para o modelo. Nenhum script
 | `handoff new` | Scaffold com campos derivados do nó `reserved` | `state.toml` | handoff | neutra |
 | `kit-lint` (+ `state-lint`) | Invariantes de G3 sobre fixture e `state.toml` fornecido; paridade; TOML/YAML; `git diff --check` | kit | nada | neutra |
 
-Transições de **julgamento** (`receipt_validated → accepted | returned | closed_*`, escolha de `edge`, escolha de papel) são gravadas pela Marina com `state add`/`state set` e nunca inferidas por script.
+Transições de **julgamento** (`receipt_validated → accepted | returned | closed_*`, escolha de `edge`, escolha de papel) são gravadas pela coordenadora com `state add`/`state set` e nunca inferidas por script.
 
-Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`, `reconcile` (parte de arquivos) e `kit-lint` funcionam sem adaptação. A Marina grava `native.platform = "codex"`, `id = threadId`, `host = hostId` manualmente após `create_thread`, e observa via `wait_threads`. A assimetria (análise 7.4) fica confinada aos dois adaptadores `*-claude`.
+Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`, `reconcile` (parte de arquivos) e `kit-lint` funcionam sem adaptação. A coordenadora grava `native.platform = "codex"`, `id = threadId`, `host = hostId` manualmente após `create_thread`, e observa via `wait_threads`. A assimetria (análise 7.4) fica confinada aos dois adaptadores `*-claude`.
 
 ---
 
@@ -392,7 +392,7 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 | Invariantes listadas em 2.3 | Viram oito verificações de `state-lint` (5), executáveis sobre fixture em `kit-lint` e sobre o estado real antes de qualquer lançamento. |
 | `gate` verifica "receipt do predecessor + manager + git" | `gate` distingue P_writer de P_reader: leitores exigem apenas ausência de writer ativo nos mesmos alvos, o que libera revisões e análises sem esperar gates de Git desnecessários. Interseção de `targets` entre **todas** as tarefas, não só a atual. |
 | 7.4 assimetria Codex | Estado neutro registra Codex (`id`/`host`) manualmente; seis dos nove scripts funcionam para Codex sem adaptação (7). |
-| 7.9 sobre-automação | Explicitamente codificado: `gate` responde sim/não e nunca transita; `watch` sai ao observar; transições de mérito só por `marina`; quatro pontos de humano-no-loop nomeados (attach, lançamento, aceite/devolução, segundo FAIL). |
+| 7.9 sobre-automação | Explicitamente codificado: `gate` responde sim/não e nunca transita; `watch` sai ao observar; transições de mérito só por `coordinator`; quatro pontos de humano-no-loop nomeados (attach, lançamento, aceite/devolução, segundo FAIL). |
 | Fallback "delegação visível indisponível" só em prosa | `native.platform = "unavailable"` + `reason` obrigatório; `state-lint` falha se faltar o motivo (5, invariante 6). |
 | 4.4 `status` valida schema do manager | Mantido; adiciona `native.last_seen*` como registro da última observação, útil para `reconcile` por janela de tempo. |
 | 9 roteiro em três etapas | Etapa 0 de schema e fixture antes de qualquer script; `state` como biblioteca comum antes de `preflight` (9). |
@@ -406,7 +406,7 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 - Confirmar decisões da seção 11.
 - Escrever `tests/fixtures/visible-sessions/state.toml` derivado do checkpoint real, sanitizado, cobrindo: `preparation_failed` (01), `waiting_approval → accepted` com `PASS_WITH_RISKS` (02, 03), um nó `unavailable` (fallback Codex) e um nó `uncertain → abandoned` sintético.
 - Documentar o schema v0 e as tabelas de G2/G3 em `docs/agent-workflow.md` como contrato; o diário continua descrito em prosa.
-- Revisão da Clara sobre o contrato (é mudança de contrato do kit — análise 7.8/11).
+- Revisão do `reviewer` sobre o contrato (é mudança de contrato do kit — análise 7.8/11).
 
 ### Etapa 1 — estado e gates neutros
 
@@ -416,7 +416,7 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 - `kit-lint` com `state-lint` (invariantes 1–8) e os checks já existentes (paridade, TOML/YAML, `git diff --check`).
 - `receipt-lint` com `receipt_summary` e `risks_digest` — antecipado da Etapa 2 porque `gate` depende dele.
 - Testes `unittest` sobre a fixture; `kit-lint` os executa.
-- Revisão da Clara sobre `scripts/`.
+- Revisão do `reviewer` sobre `scripts/`.
 
 ### Etapa 2 — adaptadores e predicados
 
@@ -436,7 +436,7 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 - `state-lint` vermelho em cada uma das oito invariantes quebradas de propósito (uma fixture negativa por invariante).
 - `gate` recusa `corrige` numa fixture com `risks_digest` repetido e aceita com `risks_digest` distinto.
 - `kit-lint` verde no kit atual e vermelho numa quebra de paridade introduzida de propósito.
-- Receipt da Clara `PASS` ou `PASS_WITH_RISKS` sobre o contrato (Etapa 0) e sobre `scripts/` (Etapa 1), com os riscos 7.2 e 7.3 da análise avaliados.
+- Receipt do `reviewer` `PASS` ou `PASS_WITH_RISKS` sobre o contrato (Etapa 0) e sobre `scripts/` (Etapa 1), com os riscos 7.2 e 7.3 da análise avaliados.
 
 ---
 
@@ -458,7 +458,7 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 |---|---|---|---|
 | D1 | Formato do estado mecânico | TOML (stdlib para leitura; kit já usa; escritor mínimo trivial) | YAML (PyYAML obrigatório) ou JSON (stdlib, pior para humanos e diffs) |
 | D2 | Escopo de P_writer | Interseção de `targets` entre **todas** as tarefas com `state.toml` no kit | Só a tarefa atual (mais simples; perde o caso de duas tarefas no mesmo alvo) |
-| D3 | `risks_digest` | Títulos de risco normalizados extraídos por `receipt-lint`; predicado por interseção | Marina informa manualmente "mesmos findings: sim/não" ao criar o nó (`gate` só exige o campo) |
+| D3 | `risks_digest` | Títulos de risco normalizados extraídos por `receipt-lint`; predicado por interseção | A coordenadora informa manualmente "mesmos findings: sim/não" ao criar o nó (`gate` só exige o campo) |
 | D4 | Ponto de decisão no segundo `FAIL` | Obrigatório e registrado no diário antes de `corrige` | Apenas aviso |
 | D5 | `prepared` conta como writer ativo | Sim (impede dois `preflight` sucessivos para writers) | Não (ativo só a partir de `launched`) |
 | D6 | Estados terminais sem resultado (`receipt_missing`, `receipt_invalid`) | Terminais; sucessor via `substitui` | Reabrir o mesmo nó (contraria "nunca reutilizar sessão") — **não recomendado** |
