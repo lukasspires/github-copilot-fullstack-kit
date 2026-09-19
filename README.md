@@ -1,6 +1,6 @@
 # Kit de agentes multi-repositório para Codex e Claude Code
 
-Este repositório é um **kit de coordenação**, não uma aplicação. Ele fornece perfis de agentes, skills e instruções de domínio para que uma sessão principal (a coordenadora **Marina**) receba uma tarefa, identifique o trabalho restante, delegue a especialistas em sessões visíveis independentes e consolide a implementação e a verificação local nos repositórios da aplicação.
+Este repositório é um **kit de coordenação**, não uma aplicação. Ele fornece perfis de agentes, skills e instruções de domínio para que uma sessão principal (a coordenadora, perfil `coordinator`) receba uma tarefa, identifique o trabalho restante, delegue a especialistas em sessões visíveis independentes e consolide a implementação e a verificação local nos repositórios da aplicação.
 
 > Este README é documentação para pessoas. Os runtimes não o carregam como instrução: Claude Code lê `CLAUDE.md` (que importa `AGENTS.md`), `.claude/agents/` e `.claude/skills/`; Codex lê `AGENTS.md`, `.codex/agents/` e `.agents/skills/`. Por isso ele pode ser escrito em português sem afetar o comportamento dos agentes.
 
@@ -49,7 +49,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 Inicie **na raiz do kit** e adicione cada repositório-alvo com `--add-dir`. Substitua os caminhos de exemplo pelos seus caminhos absolutos:
 
 ```bash
-claude --agent marina --add-dir /caminho/absoluto/api --add-dir /caminho/absoluto/bff
+claude --agent coordinator --add-dir /caminho/absoluto/api --add-dir /caminho/absoluto/bff
 ```
 
 ### Codex
@@ -75,15 +75,15 @@ Preservar o contrato atual do endpoint /v1/pacientes. Critério: testes existent
 
 ## Como uma tarefa é executada
 
-1. **Intake** — Marina consolida objetivo, critérios, decisões posteriores e evidência; distingue o que foi pedido, o que foi decidido depois, o que foi relatado como feito e o que foi verificado. Estado, percentual ou link de MR **não** provam conclusão.
-2. **Checkpoint** — Para toda tarefa com atribuições, Marina mantém `.agent-state/<projeto>/tasks/<tarefa>/checkpoint.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação. `<projeto>` é o slug do repositório-alvo ou, em tarefas com vários repositórios, do diretório de workspace que os agrupa; assim o estado de projetos diferentes nunca se mistura. Antes de redescobrir, Marina lê a memória estável em `.agent-state/<projeto>/project/` (repositórios, arquitetura, convenções, integrações), que só ela escreve. Anexos e PDFs da tarefa ficam em `tasks/<tarefa>/inputs/`.
-3. **Roteamento** — Uma correção simples vai para um único especialista. Sofia entra para decisões de arquitetura, contratos compartilhados, migrations e backfills; Clara revisa automaticamente autorização, contratos públicos, integridade de dados, migrations e operações críticas.
-4. **Handoff** — Antes de cada atribuição, Marina escreve `.agent-state/<projeto>/tasks/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência (inclusive o que já está em `project/`), critérios, checks descobertos e allowlist.
+1. **Intake** — A coordenadora consolida objetivo, critérios, decisões posteriores e evidência; distingue o que foi pedido, o que foi decidido depois, o que foi relatado como feito e o que foi verificado. Estado, percentual ou link de MR **não** provam conclusão.
+2. **Checkpoint** — Para toda tarefa com atribuições, a coordenadora mantém `.agent-state/<projeto>/tasks/<tarefa>/checkpoint.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação. `<projeto>` é o slug do repositório-alvo ou, em tarefas com vários repositórios, do diretório de workspace que os agrupa; assim o estado de projetos diferentes nunca se mistura. Antes de redescobrir, a coordenadora lê a memória estável em `.agent-state/<projeto>/project/` (repositórios, arquitetura, convenções, integrações), que só ela escreve. Anexos e PDFs da tarefa ficam em `tasks/<tarefa>/inputs/`.
+3. **Roteamento** — Uma correção simples vai para um único especialista. O `architect` entra para decisões de arquitetura, contratos compartilhados, migrations e backfills; o `reviewer` revisa automaticamente autorização, contratos públicos, integridade de dados, migrations e operações críticas.
+4. **Handoff** — Antes de cada atribuição, a coordenadora escreve `.agent-state/<projeto>/tasks/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência (inclusive o que já está em `project/`), critérios, checks descobertos e allowlist.
 5. **Sessão visível** — Cada implementação, revisão, correção ou análise abre uma sessão nova com título `<tarefa> — <papel> — <NN> — <tipo>`. Claude: `claude --bg --agent <papel>` com permissões por atribuição. Codex: `create_thread` no ambiente `local` do projeto. Nunca reutilizar, retomar ou bifurcar sessões concluídas.
-6. **Receipt** — O especialista escreve `<NN>-<papel>-receipt.md` com `status`, `changed`, `checks`, `evidence`, `risks`, `next`, mais `profile_read` e `instructions_read` (caminhos absolutos realmente lidos). Clara acrescenta `verdict` (`PASS`, `PASS_WITH_RISKS`, `FAIL`). Qualquer papel pode listar `promote_to_project_knowledge` — fatos curtos e sanitizados que valem para o projeto, não só para a tarefa; Marina decide o que promover para `project/`, e nenhum especialista escreve lá.
-7. **Gate entre writers** — O próximo writer só é liberado com o receipt final do anterior, evidência do gerenciador nativo de que ele parou, e `git status/diff` do alvo conferido e registrado. Writers são sequenciais entre repositórios; leitores (Clara, Sofia, analista-redmine) podem sobrepor-se a outros leitores, nunca a um writer no mesmo alvo.
+6. **Receipt** — O especialista escreve `<NN>-<papel>-receipt.md` com `status`, `changed`, `checks`, `evidence`, `risks`, `next`, mais `profile_read` e `instructions_read` (caminhos absolutos realmente lidos). O `reviewer` acrescenta `verdict` (`PASS`, `PASS_WITH_RISKS`, `FAIL`). Qualquer papel pode listar `promote_to_project_knowledge` — fatos curtos e sanitizados que valem para o projeto, não só para a tarefa; A coordenadora decide o que promover para `project/`, e nenhum especialista escreve lá.
+7. **Gate entre writers** — O próximo writer só é liberado com o receipt final do anterior, evidência do gerenciador nativo de que ele parou, e `git status/diff` do alvo conferido e registrado. Writers são sequenciais entre repositórios; leitores (`reviewer`, `architect`, analista-redmine) podem sobrepor-se a outros leitores, nunca a um writer no mesmo alvo.
 8. **Correção** — Achados voltam ao **mesmo papel** em uma **nova** sessão. Falha repetida sem evidência nova exige novo diagnóstico, não uma alegação arbitrária de conclusão.
-9. **Consolidação** — Marina reporta evidência por critério de aceitação, resultado da revisão, riscos remanescentes e checks pulados.
+9. **Consolidação** — A coordenadora reporta evidência por critério de aceitação, resultado da revisão, riscos remanescentes e checks pulados.
 
 Se a plataforma não conseguir abrir sessões visíveis, a sessão principal assume a especialidade e registra no checkpoint e na resposta: `delegação visível indisponível: <motivo>; especialidade <papel> assumida na sessão principal`. Esse fallback não é revisão independente. Criação com resultado incerto é reconciliada no gerenciador de sessões antes de qualquer nova tentativa.
 
@@ -91,24 +91,24 @@ Se a plataforma não conseguir abrir sessões visíveis, a sessão principal ass
 
 | Papel | Especialidade | Escreve em alvos |
 |---|---|---|
-| **Marina** | Coordenação na sessão principal: intake, roteamento, delegação sequencial, checkpoint, consolidação | Apenas docs/config gerais pequenas e checkpoints |
-| **Alice** | Angular: UI, estado, acessibilidade, acesso a dados | Escopo atribuído |
-| **Bruno** | Java: APIs, domínio, persistência, segurança, testes | Escopo atribuído |
-| **Gustavo** | Go backend: APIs, serviços, persistência | Escopo atribuído |
-| **Gabriel** | Go ETL: ingestão, concorrência limitada, I/O confiável | Escopo atribuído |
-| **Paula** | Python ETL: ingestão, transformação, carga, recuperação | Escopo atribuído |
+| `coordinator` | Coordenação na sessão principal: intake, roteamento, delegação sequencial, checkpoint, consolidação | Apenas docs/config gerais pequenas e checkpoints |
+| `angular` | Angular: UI, estado, acessibilidade, acesso a dados | Escopo atribuído |
+| `java-backend` | Java: APIs, domínio, persistência, segurança, testes | Escopo atribuído |
+| `go-backend` | Go backend: APIs, serviços, persistência | Escopo atribuído |
+| `go-etl` | Go ETL: ingestão, concorrência limitada, I/O confiável | Escopo atribuído |
+| `python-etl` | Python ETL: ingestão, transformação, carga, recuperação | Escopo atribuído |
 | **node-backend** | Node.js/TypeScript: BFFs, APIs, integrações upstream | Escopo atribuído |
-| **Diana** | Análise de dados: SQL reproduzível, notebooks, métricas, reconciliação | Escopo atribuído |
-| **Sofia** | Arquitetura: decisões materiais, contratos compartilhados, migrations, backfills | Não (só o próprio receipt) |
-| **Clara** | Revisão independente por risco: correção, segurança, integridade, compatibilidade, testes | Não (só o próprio receipt) |
+| `data-analyst` | Análise de dados: SQL reproduzível, notebooks, métricas, reconciliação | Escopo atribuído |
+| `architect` | Arquitetura: decisões materiais, contratos compartilhados, migrations, backfills | Não (só o próprio receipt) |
+| `reviewer` | Revisão independente por risco: correção, segurança, integridade, compatibilidade, testes | Não (só o próprio receipt) |
 | **analista-redmine** | Opcional: histórico complexo de tarefas, requisitos atuais, trabalho restante | Não (só o próprio receipt) |
 
 Regras de roteamento que costumam gerar dúvida:
 
-- Backend TypeScript/BFF é do `node-backend`, não da Alice.
-- Migrations SQL da aplicação vão para o dono do módulo, não para a Diana só por causa da extensão. SQL avulso sem dono pode ficar na sessão principal, com Sofia para arquitetura e Clara para revisão.
-- Várias tecnologias na mesma tarefa **não** exigem Sofia; um contrato compartilhado ou uma migration, sim. Conte consequências, não linguagens.
-- Papéis read-only (Sofia, Clara, analista-redmine) escrevem apenas o próprio receipt. Essa fronteira é de instrução, não de sandbox; as permissões do runtime continuam valendo.
+- Backend TypeScript/BFF é do `node-backend`, não do `angular`.
+- Migrations SQL da aplicação vão para o dono do módulo, não para o `data-analyst` só por causa da extensão. SQL avulso sem dono pode ficar na sessão principal, com `architect` para arquitetura e `reviewer` para revisão.
+- Várias tecnologias na mesma tarefa **não** exigem o `architect`; um contrato compartilhado ou uma migration, sim. Conte consequências, não linguagens.
+- Papéis read-only (`architect`, `reviewer`, analista-redmine) escrevem apenas o próprio receipt. Essa fronteira é de instrução, não de sandbox; as permissões do runtime continuam valendo.
 
 ## Configurações nativas por plataforma
 
@@ -123,13 +123,13 @@ As cópias fornecem comportamento equivalente com metadados nativos de cada plat
 
 ## Skills principais
 
-Skills são procedimentos carregados sob demanda. No Claude Code, a Marina e os especialistas carregam a skill relevante automaticamente; você também pode invocá-la por `/nome-da-skill`. No Codex, use `$nome-da-skill` no prompt. Carregue apenas o necessário: uma alteração só em conector não exige a skill de pipeline completo.
+Skills são procedimentos carregados sob demanda. No Claude Code, a coordenadora e os especialistas carregam a skill relevante automaticamente; você também pode invocá-la por `/nome-da-skill`. No Codex, use `$nome-da-skill` no prompt. Carregue apenas o necessário: uma alteração só em conector não exige a skill de pipeline completo.
 
 ### Coordenação e qualidade
 
 #### `task-execution`
 
-- **O que faz:** procedimento operacional da Marina — intake de texto/PDF/link, identificação do trabalho restante, roteamento por evidência, sessões visíveis, checkpoint, handoff/receipt e retomada.
+- **O que faz:** procedimento operacional da coordenadora — intake de texto/PDF/link, identificação do trabalho restante, roteamento por evidência, sessões visíveis, checkpoint, handoff/receipt e retomada.
 - **Quando usar:** escopo incerto, histórico longo, vários repositórios ou retomada de uma tarefa interrompida. Uma tarefa limitada a um especialista pode ir direto ao papel.
 - **Exemplo:**
   ```text
@@ -139,7 +139,7 @@ Skills são procedimentos carregados sob demanda. No Claude Code, a Marina e os 
 #### `quality-gate`
 
 - **O que faz:** revisão por risco de correção, segurança, testes, compatibilidade, integridade de dados e prontidão operacional, com achados acionáveis (severidade, local, evidência, impacto, correção) e veredito separado.
-- **Quando usar:** automaticamente pela Clara em mudanças de autorização, contrato público, integridade de dados, migration ou operação crítica; ou em revisão explícita.
+- **Quando usar:** automaticamente pelo `reviewer` em mudanças de autorização, contrato público, integridade de dados, migration ou operação crítica; ou em revisão explícita.
 - **Exemplo:**
   ```text
   Revisar o diff atual de /abs/api contra os critérios do handoff 03. Só checks não mutantes. Receipt com verdict.
@@ -206,7 +206,7 @@ Skills são procedimentos carregados sob demanda. No Claude Code, a Marina e os 
 #### `data-analysis`
 
 - **O que faz:** análise reproduzível de dados do repositório com profiling, validação de métricas, reconciliação e conclusões apoiadas em evidência.
-- **Quando usar:** perguntas analíticas, reconciliação entre fontes, validação de métricas. Análise pura usa a autovalidação da Diana; se alterar comportamento de produção, entra revisão.
+- **Quando usar:** perguntas analíticas, reconciliação entre fontes, validação de métricas. Análise pura usa a autovalidação do `data-analyst`; se alterar comportamento de produção, entra revisão.
 - **Exemplo:**
   ```text
   Reconciliar o total de internações do relatório mensal com a tabela fato; explicar divergências por unidade com SQL reproduzível.
@@ -284,7 +284,7 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 - Carregue só as instruções e skills relevantes; reutilize descobertas e extratos de PDF; roteie de forma estreita e revise por consequência.
 - Teste o comportamento alterado proporcionalmente com os comandos descobertos no projeto; reporte resultados exatos e checks pulados. Não adicione testes que apenas repetem mudanças de texto de baixo impacto.
 - Meça tokens reais apenas quando o runtime os expõe; menos agentes ou menos bytes não são um percentual de economia.
-- O kit não possui um validador permanente de customizações. Avalie mudanças com checks estruturais direcionados (parse de TOML/YAML, paridade `.codex`/`.claude`, `git diff --check`) e simulações realistas de tarefa, reportando honestamente os checks de runtime não executados. Uma proposta de scripts de apoio está em [docs/analise-scripts-apoio-marina.md](docs/analise-scripts-apoio-marina.md).
+- O kit não possui um validador permanente de customizações. Avalie mudanças com checks estruturais direcionados (parse de TOML/YAML, paridade `.codex`/`.claude`, `git diff --check`) e simulações realistas de tarefa, reportando honestamente os checks de runtime não executados. Uma proposta de scripts de apoio está em [docs/analise-scripts-apoio-coordenacao.md](docs/analise-scripts-apoio-coordenacao.md).
 
 ## Documentação relacionada
 
@@ -293,6 +293,6 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 | [AGENTS.md](AGENTS.md) | Guia operacional carregado pelos runtimes: contexto, equipe, sessões independentes, normas e entrega |
 | [CLAUDE.md](CLAUDE.md) | Particularidades do runtime Claude Code (importa `AGENTS.md`) |
 | [docs/agent-workflow.md](docs/agent-workflow.md) | Papéis, handoffs, procedimento de lançamento/monitoramento por plataforma, aceitação e cenários de avaliação |
-| [docs/analise-scripts-apoio-marina.md](docs/analise-scripts-apoio-marina.md) | Análise de scripts auxiliares para o fluxo da Marina: casos de uso, benefícios, riscos e roteiro |
+| [docs/analise-scripts-apoio-coordenacao.md](docs/analise-scripts-apoio-coordenacao.md) | Análise de scripts auxiliares para o fluxo da coordenadora: casos de uso, benefícios, riscos e roteiro |
 | `.claude/skills/*/SKILL.md` e `.agents/skills/*/SKILL.md` | Texto completo de cada skill, com templates e referências |
 | `.claude/instructions/` e `.codex/instructions/` | Instruções de domínio por responsabilidade de módulo |
