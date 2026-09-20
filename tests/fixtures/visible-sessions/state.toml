@@ -1,0 +1,375 @@
+# tests/fixtures/visible-sessions/state.toml — fixture versionada do schema v0
+# (docs/plano-estado-estruturado-e-grafos.md, seção 2.3).
+#
+# Derivada e sanitizada de .agent-state/visible-sessions.md e dos receipts reais
+# 02/03 (ignorados pelo Git). Nós 1-4 refletem eventos reais da tarefa que introduziu
+# sessões visíveis independentes; nó 5 é SINTÉTICO (não corresponde a nenhum evento
+# real) e existe só para exercitar a transição uncertain -> abandoned exigida pela
+# Etapa 0 do plano. Nenhum segredo, transcrição completa ou dado de ambiente real.
+schema = 1
+
+[task]
+project    = "github-copilot-fullstack-kit"
+slug       = "visible-sessions"
+title      = "Visible sessions kit update"
+phase      = "review"
+kit_root   = "/mnt/dados/GitHub/github-copilot-fullstack-kit"
+targets    = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+journal    = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/checkpoint.md"
+next_nn    = 6
+created_at = 2026-09-11T09:00:00-03:00
+updated_at = 2026-09-12T10:00:00-03:00
+
+# ---- nn=1 — implementação, preparation_failed -----------------------------
+# Real: lançamento seguiu preparação falha porque os comandos não eram fail-fast;
+# node não resolvido no PATH da sessão em background.
+
+[[assignments]]
+nn          = 1
+role        = "node-backend"
+type        = "implementação"
+mode        = "writer"
+edge        = "inicia"
+predecessor = 0
+targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+title       = "visible-sessions — node-backend — 01 — implementação"
+state       = "preparation_failed"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/01-node-backend-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/01-node-backend-receipt.md"
+git_before  = ""
+allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/fixture && node --test)"]
+
+  [assignments.native]
+  platform     = "claude"
+  id           = "182689df"
+  host         = ""
+  reason       = ""
+  last_seen    = "stopped"
+  last_seen_at = 2026-09-11T11:20:00-03:00
+
+  [[assignments.events]]
+  at   = 2026-09-11T11:00:00-03:00
+  from = ""
+  to   = "reserved"
+  by   = "coordinator"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T11:05:00-03:00
+  from = "reserved"
+  to   = "preparation_failed"
+  by   = "preflight"
+  note = "node não resolvido no PATH da sessão em background; lançamento não deveria ter seguido"
+
+# ---- nn=2 — revisão, waiting_approval -> accepted, PASS_WITH_RISKS --------
+# Real: nn=1 não produziu diff (preparação falhou), então esta revisão não avalia
+# um nó writer do grafo — avalia edições diretas da coordenadora (documentação e
+# perfis do kit), que não são nós. edge="revisa_direta" (adicionado em resposta ao
+# Achado 1 da revisão d0edc324) nomeia exatamente esse caso.
+
+[[assignments]]
+nn          = 2
+role        = "reviewer"
+type        = "revisão"
+mode        = "reader"
+edge        = "revisa_direta"
+predecessor = 0
+targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+title       = "visible-sessions — reviewer — 02 — revisão"
+state       = "accepted"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-reviewer-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/02-reviewer-receipt.md"
+git_before  = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/git-before-02.txt"
+allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
+
+  [assignments.native]
+  platform     = "claude"
+  id           = "c1897dee"
+  host         = ""
+  reason       = ""
+  last_seen    = "done"
+  last_seen_at = 2026-09-11T14:00:00-03:00
+
+  [assignments.receipt_summary]
+  status       = "done"
+  verdict      = "PASS_WITH_RISKS"
+  profile_ok   = true
+  risks_digest = [
+    "permission enforcement reliance on instructions",
+    "unexecuted visible-session runtime scenarios",
+    "platform version pinning without compatibility range",
+    "assignment number collision potential",
+    "unclear fallback exit criteria",
+  ]
+
+  [[assignments.events]]
+  at   = 2026-09-11T11:30:00-03:00
+  from = ""
+  to   = "reserved"
+  by   = "coordinator"
+  note = "revisa edições diretas da coordenadora (docs/config do kit); nn=1 falhou preparação e não produziu diff, logo não há nó writer para revisar"
+
+  [[assignments.events]]
+  at   = 2026-09-11T11:35:00-03:00
+  from = "reserved"
+  to   = "prepared"
+  by   = "preflight"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T11:40:00-03:00
+  from = "prepared"
+  to   = "launched"
+  by   = "launch"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T12:00:00-03:00
+  from = "launched"
+  to   = "waiting_approval"
+  by   = "status"
+  note = "reviewer tentou git worktree add fora do escopo; bloqueado pelo guard de isolamento de worktree em background; usuário instruído a negar via attach"
+
+  [[assignments.events]]
+  at   = 2026-09-11T12:30:00-03:00
+  from = "waiting_approval"
+  to   = "working"
+  by   = "status"
+  note = "usuário negou via attach; sessão prosseguiu sem worktree, dentro do checkout compartilhado"
+
+  [[assignments.events]]
+  at   = 2026-09-11T13:50:00-03:00
+  from = "working"
+  to   = "finished"
+  by   = "status"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T13:55:00-03:00
+  from = "finished"
+  to   = "receipt_received"
+  by   = "status"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T13:58:00-03:00
+  from = "receipt_received"
+  to   = "receipt_validated"
+  by   = "receipt-lint"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T14:00:00-03:00
+  from = "receipt_validated"
+  to   = "accepted"
+  by   = "coordinator"
+  note = "PASS_WITH_RISKS aceito; riscos registrados para acompanhamento, nenhum bloqueante"
+
+# ---- nn=3 — revisão, waiting_approval -> accepted, PASS_WITH_RISKS --------
+# Real: reavalia correções que a coordenadora aplicou diretamente após os riscos
+# do nó 2 (não uma sessão writer). edge="revisa_direta" com predecessor=2 nomeia
+# isso: revisão de uma correção direta, referenciando a revisão anterior cujos
+# riscos motivaram a correção.
+
+[[assignments]]
+nn          = 3
+role        = "reviewer"
+type        = "revisão"
+mode        = "reader"
+edge        = "revisa_direta"
+predecessor = 2
+targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+title       = "visible-sessions — reviewer — 03 — revisão"
+state       = "accepted"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/03-reviewer-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/03-reviewer-receipt.md"
+git_before  = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/git-before-03.txt"
+allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --short)"]
+
+  [assignments.native]
+  platform     = "claude"
+  id           = "70409944"
+  host         = ""
+  reason       = ""
+  last_seen    = "done"
+  last_seen_at = 2026-09-11T17:00:00-03:00
+
+  [assignments.receipt_summary]
+  status       = "done"
+  verdict      = "PASS_WITH_RISKS"
+  profile_ok   = true
+  risks_digest = [
+    "preparation gate effectiveness depends on coordinator discipline",
+    "worktree bgisolation setting not yet validated in practice",
+    "carrying forward unexecuted scenario risk from assignment 02",
+    "permission model still relies on instructions rather than tooling",
+  ]
+
+  [[assignments.events]]
+  at   = 2026-09-11T15:00:00-03:00
+  from = ""
+  to   = "reserved"
+  by   = "coordinator"
+  note = "revisa correções que a coordenadora aplicou diretamente em resposta aos riscos do nó 2; não há nó writer intermediário"
+
+  [[assignments.events]]
+  at   = 2026-09-11T15:05:00-03:00
+  from = "reserved"
+  to   = "prepared"
+  by   = "preflight"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T15:10:00-03:00
+  from = "prepared"
+  to   = "launched"
+  by   = "launch"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T15:30:00-03:00
+  from = "launched"
+  to   = "waiting_approval"
+  by   = "status"
+  note = "prompt de permissão real para Read(/tmp/visible-sessions-settings.md), arquivo de referência fora do alvo suprido"
+
+  [[assignments.events]]
+  at   = 2026-09-11T16:00:00-03:00
+  from = "waiting_approval"
+  to   = "working"
+  by   = "status"
+  note = "usuário aprovou via attach, escolha pontual"
+
+  [[assignments.events]]
+  at   = 2026-09-11T16:50:00-03:00
+  from = "working"
+  to   = "finished"
+  by   = "status"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T16:55:00-03:00
+  from = "finished"
+  to   = "receipt_received"
+  by   = "status"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T16:58:00-03:00
+  from = "receipt_received"
+  to   = "receipt_validated"
+  by   = "receipt-lint"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T17:00:00-03:00
+  from = "receipt_validated"
+  to   = "accepted"
+  by   = "coordinator"
+  note = "PASS_WITH_RISKS aceito; riscos remanescentes (execução real de cadeia de 4 sessões) permanecem em aberto no checkpoint"
+
+# ---- nn=4 — análise, platform=unavailable (fallback Codex) ----------------
+# Real: ambiente Codex desktop proibiu create_thread para subtarefas; a coordenadora
+# assumiu a especialidade de validação Codex na sessão principal e divulgou o
+# fallback, conforme docs/agent-workflow.md ("delegação visível indisponível").
+
+[[assignments]]
+nn          = 4
+role        = "reviewer"
+type        = "análise"
+mode        = "reader"
+edge        = "analisa"
+predecessor = 3
+targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+title       = "visible-sessions — reviewer — 04 — análise"
+state       = "accepted"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/04-reviewer-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/04-reviewer-receipt.md"
+git_before  = ""
+allowlist   = []
+
+  [assignments.native]
+  platform     = "unavailable"
+  id           = ""
+  host         = ""
+  reason       = "ambiente Codex desktop proíbe create_thread para subtarefas nesta sessão"
+  last_seen    = ""
+  last_seen_at = 2026-09-11T18:00:00-03:00
+
+  [assignments.receipt_summary]
+  status       = "done"
+  verdict      = ""
+  profile_ok   = true
+  risks_digest = [
+    "codex chain unavailable under current tool restriction; does not pass real acceptance scenario",
+  ]
+
+  [[assignments.events]]
+  at   = 2026-09-11T17:50:00-03:00
+  from = ""
+  to   = "reserved"
+  by   = "coordinator"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-11T18:00:00-03:00
+  from = "reserved"
+  to   = "accepted"
+  by   = "coordinator"
+  note = "delegação visível indisponível: restrição do ambiente; especialidade de validação Codex assumida na sessão principal; não substitui a cadeia real Codex exigida pelo critério de aceitação"
+
+# ---- nn=5 — implementação, uncertain -> abandoned (SINTÉTICO) --------------
+# Não corresponde a nenhum evento real do checkpoint. Cobre o caso exigido pela
+# Etapa 0: launch emitido sem ID confirmado, seguido de reconciliação que não
+# encontra sessão compatível no manager.
+
+[[assignments]]
+nn          = 5
+role        = "node-backend"
+type        = "implementação"
+mode        = "writer"
+edge        = "substitui"
+predecessor = 1
+targets     = ["/mnt/dados/GitHub/github-copilot-fullstack-kit"]
+title       = "visible-sessions — node-backend — 05 — implementação"
+state       = "abandoned"
+handoff     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/05-node-backend-handoff.md"
+receipt     = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/05-node-backend-receipt.md"
+git_before  = ".agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/git-before-05.txt"
+allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-state/github-copilot-fullstack-kit/tasks/visible-sessions/fixture && node --test)"]
+
+  [assignments.native]
+  platform     = "claude"
+  id           = ""
+  host         = ""
+  reason       = ""
+  last_seen    = ""
+  last_seen_at = 2026-09-13T10:10:00-03:00
+
+  [[assignments.events]]
+  at   = 2026-09-13T10:00:00-03:00
+  from = ""
+  to   = "reserved"
+  by   = "coordinator"
+  note = "nó sintético, criado só para fixture de teste"
+
+  [[assignments.events]]
+  at   = 2026-09-13T10:02:00-03:00
+  from = "reserved"
+  to   = "prepared"
+  by   = "preflight"
+  note = ""
+
+  [[assignments.events]]
+  at   = 2026-09-13T10:05:00-03:00
+  from = "prepared"
+  to   = "uncertain"
+  by   = "launch"
+  note = "comando emitido; timeout na captura do ID impresso"
+
+  [[assignments.events]]
+  at   = 2026-09-13T10:10:00-03:00
+  from = "uncertain"
+  to   = "abandoned"
+  by   = "reconcile"
+  note = "nenhuma sessão compatível por título/cwd/janela de tempo encontrada no manager"

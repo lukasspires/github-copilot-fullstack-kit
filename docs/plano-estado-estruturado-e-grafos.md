@@ -2,7 +2,7 @@
 
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `5abaed8`)
-- **Status:** planejamento; nenhum script, schema definitivo ou alteração de contrato implementados
+- **Status:** Etapa 0 concluída em 2026-09-19 (schema v0 documentado como contrato em `docs/agent-workflow.md`, fixture versionada em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS` — tarefa `structured-state`, receipts `01`/`02`). Etapas 1–3 (scripts) não iniciadas; nenhum código existe ainda.
 - **Base:** [`analise-scripts-apoio-coordenacao.md`](analise-scripts-apoio-coordenacao.md) (seções 4, 9, 10 e 12)
 - **Escopo:** definir o estado estruturado de uma tarefa como estado de um grafo, planejar os grafos e loops do fluxo, e reordenar o roteiro da análise a partir desse modelo
 
@@ -279,10 +279,13 @@ stateDiagram-v2
 
 Cada nó tem exatamente um `predecessor` (0 para o primeiro) e uma `edge` que nomeia **por que** foi criado. A aresta é escolhida pela coordenadora; o predicado que a habilita é verificado por `gate`.
 
+`revisa_direta` foi adicionado em 2026-09-19 a partir do Achado 1 da revisão `structured-state — reviewer — 01` (`d0edc324`): uma versão inicial deste modelo tentou cobrir esse caso ampliando `inicia`/`continua`, mas isso deixou o contrato em `docs/agent-workflow.md` e esta tabela dizendo coisas diferentes. O edge dedicado resolve a divergência sem sobrecarregar os dois outros.
+
 | `edge` | De (predecessor) | Para (novo nó) | Quando | Predicado de `gate` |
 |---|---|---|---|---|
 | `inicia` | nenhum | `writer` ou `reader` | Primeira atribuição da tarefa | P0 |
 | `revisa` | `writer` em `accepted`/`closed_pending` | `reviewer` (`reader`) | Gatilho automático ou pedido explícito | P0 + P_reader |
+| `revisa_direta` | qualquer fechado, ou nenhum | papel leitor (tipicamente `reviewer`) | Revisão de uma mudança que a própria coordenadora fez diretamente, fora do grafo — suas edições pequenas de docs/config, ou uma correção que ela mesma aplicou em resposta aos achados de uma revisão anterior, sem abrir um nó `writer` | P0 + P_reader |
 | `analisa` | qualquer fechado, ou nenhum | `architect` / analista-redmine / `data-analyst` / mesmo papel com `type = análise` | Decisão material, histórico, ou loop sem progresso (6.1) | P0 + P_reader (ou P_writer se o papel escreve) |
 | `corrige` | `reviewer` em `accepted` com `verdict = FAIL` | mesmo papel do writer revisado, `type = correção` | Findings a corrigir | P0 + P_writer + P_progresso (6.1) |
 | `continua` | `closed_needs_input` (após resposta) / `closed_pending` | mesmo papel, mesmo `type` do predecessor | Trabalho restante ou resposta do usuário | P0 + P_writer/P_reader conforme `mode` |
@@ -452,16 +455,18 @@ Codex: `state add`, `preflight`, `gate` (parte de arquivos/Git), `receipt-lint`,
 
 ---
 
-## 11. Decisões a confirmar
+## 11. Decisões confirmadas
 
-| ID | Decisão | Recomendação | Alternativa |
-|---|---|---|---|
-| D1 | Formato do estado mecânico | TOML (stdlib para leitura; kit já usa; escritor mínimo trivial) | YAML (PyYAML obrigatório) ou JSON (stdlib, pior para humanos e diffs) |
-| D2 | Escopo de P_writer | Interseção de `targets` entre **todas** as tarefas com `state.toml` no kit | Só a tarefa atual (mais simples; perde o caso de duas tarefas no mesmo alvo) |
-| D3 | `risks_digest` | Títulos de risco normalizados extraídos por `receipt-lint`; predicado por interseção | A coordenadora informa manualmente "mesmos findings: sim/não" ao criar o nó (`gate` só exige o campo) |
-| D4 | Ponto de decisão no segundo `FAIL` | Obrigatório e registrado no diário antes de `corrige` | Apenas aviso |
-| D5 | `prepared` conta como writer ativo | Sim (impede dois `preflight` sucessivos para writers) | Não (ativo só a partir de `launched`) |
-| D6 | Estados terminais sem resultado (`receipt_missing`, `receipt_invalid`) | Terminais; sucessor via `substitui` | Reabrir o mesmo nó (contraria "nunca reutilizar sessão") — **não recomendado** |
-| D7 | Onde documentar G2/G3 | `docs/agent-workflow.md` (contrato) com este plano como racional | Manter só neste documento |
+Confirmadas pelo usuário em 2026-09-19, todas na opção recomendada:
 
-Nenhum item acima altera as invariantes da análise (2.3) nem o que deve permanecer fora dos scripts (5). Todos são detalhes do modelo, não de postura.
+| ID | Decisão | Confirmado |
+|---|---|---|
+| D1 | Formato do estado mecânico | TOML (stdlib para leitura; kit já usa; escritor mínimo trivial) |
+| D2 | Escopo de P_writer | Interseção de `targets` entre **todas** as tarefas com `state.toml` no kit |
+| D3 | `risks_digest` | Títulos de risco normalizados extraídos por `receipt-lint`; predicado por interseção |
+| D4 | Ponto de decisão no segundo `FAIL` | Obrigatório e registrado no diário antes de `corrige` |
+| D5 | `prepared` conta como writer ativo | Sim (impede dois `preflight` sucessivos para writers) |
+| D6 | Estados terminais sem resultado (`receipt_missing`, `receipt_invalid`) | Terminais; sucessor via `substitui` |
+| D7 | Onde documentar G2/G3 | `docs/agent-workflow.md` (contrato) com este plano como racional |
+
+Nenhum item acima altera as invariantes da análise (2.3) nem o que deve permanecer fora dos scripts (5). Todos são detalhes do modelo, não de postura. Com as decisões confirmadas, a Etapa 0 do roteiro (seção 9) está desbloqueada.

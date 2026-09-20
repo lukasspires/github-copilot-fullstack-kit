@@ -1,0 +1,70 @@
+# tests/fixtures/gate-tasks/task-a/state.toml — SYNTHETIC fixture for
+# scripts/gate.py's cross-task P_writer/P_reader tests (tests/test_gate.py).
+# Not derived from any real task; deliberately separate from
+# tests/fixtures/visible-sessions/state.toml. One active writer (nn=1,
+# state="working") on /mnt/example/target-a. Generated via scripts.state
+# itself (add_assignment/set_state), never hand-typed, to avoid
+# transcription errors.
+schema = 1
+
+[task]
+project = "gate-fixtures"
+slug = "task-a"
+title = "Gate fixture task A"
+phase = "implementation"
+kit_root = "/mnt/example/kit"
+targets = ["/mnt/example/target-a"]
+journal = "tests/fixtures/gate-tasks/task-a/checkpoint.md"
+next_nn = 2
+created_at = 2026-01-01T10:00:00+00:00
+updated_at = 2026-01-01T10:00:00+00:00
+
+[[assignments]]
+nn = 1
+role = "node-backend"
+type = "implementação"
+mode = "writer"
+edge = "inicia"
+predecessor = 0
+targets = ["/mnt/example/target-a"]
+title = "task-a — node-backend — 01 — implementação"
+state = "working"
+handoff = "tests/fixtures/gate-tasks/task-a/01-node-backend-handoff.md"
+receipt = "tests/fixtures/gate-tasks/task-a/01-node-backend-receipt.md"
+git_before = ""
+allowlist = []
+
+[assignments.native]
+platform = "claude"
+id = ""
+host = ""
+reason = ""
+last_seen = ""
+
+[[assignments.events]]
+at = 2026-01-01T10:00:00+00:00
+from = ""
+to = "reserved"
+by = "coordinator"
+note = ""
+
+[[assignments.events]]
+at = 2026-01-01T10:00:00+00:00
+from = "reserved"
+to = "prepared"
+by = "test"
+note = ""
+
+[[assignments.events]]
+at = 2026-01-01T10:00:00+00:00
+from = "prepared"
+to = "launched"
+by = "test"
+note = ""
+
+[[assignments.events]]
+at = 2026-01-01T10:00:00+00:00
+from = "launched"
+to = "working"
+by = "test"
+note = ""
