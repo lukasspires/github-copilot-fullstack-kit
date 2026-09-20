@@ -15,6 +15,7 @@ The main session coordinates from the kit root with explicit access to each targ
 | python-etl | Python ingestion/ETL | Assigned scope |
 | node-backend | Node.js/TypeScript BFFs, APIs, integrations | Assigned scope |
 | data-analyst | Reproducible SQL, notebooks, metrics and reconciliation | Assigned scope |
+| kit-tooling | The kit's own coordination scripts under `scripts/` (Python stdlib) | `scripts/`, `tests/`, never a target |
 | analista-redmine | Optional complex-history analysis | No |
 | reviewer | Independent risk-based review | No |
 
@@ -38,6 +39,8 @@ The launch prompt is short: `Act as <role>. Read <absolute-profile> and <absolut
 
 Receipts contain `status` (`done`, `pending`, `needs_input`, `blocked`), `changed`, `checks` (command/workdir/actual result or skip), `evidence`, `risks`, `next` (action and owner), plus `profile_read` and `instructions_read` with absolute paths actually read. The reviewer adds `verdict`: `PASS`, `PASS_WITH_RISKS`, or `FAIL`. Any role may add `promote_to_project_knowledge`: short sanitized facts that are stable for the project rather than the task; the specialist never writes to `project/` itself. A review may finish with `status: done` and `verdict: FAIL`. Missing profile confirmation means loading unverified; a log or final chat answer is not a substitute for the receipt file.
 
+**Canonical receipt structure (Markdown, `##` headings, case-insensitive):** `Status`, `Verdict` (reviewer only, immediately after `Status`), `Changed`, `Profile and Instructions Read` (one combined section: a `profile_read` line and an `instructions_read` list, not two separate headings), `Checks`, `Evidence`, `Risks`, `Next`, `promote_to_project_knowledge` (when present). Each field's value is the heading's own body text, not an inline `**Field:**` marker. An `instructions_read`/`profile_read` line's value is its first absolute path (backtick-quoted or bare); trailing prose on the same line (a parenthetical note, "read-only reference", etc.) is allowed and ignored by tooling — do not omit useful annotations to satisfy a linter. This is the format every real receipt in this project's history has actually converged on; `receipt-lint` (Etapa 1/2) parses it, not the older inline-bold, one-bare-path-per-line style from before the per-project `.agent-state/` layout.
+
 The coordinator maintains `<kit_root>/.agent-state/<project>/tasks/<task>/checkpoint.md` for every task with assignments, including short ones; task inputs (PDFs, attachments) stay in `tasks/<task>/inputs/`. For each invocation record NN, platform, role, native session/ID, predecessor, type, exact allowlist, state, absolute handoff/receipt paths and result. Record the reservation before launch and the returned ID immediately afterward. Keep task decisions, scoped authorizations, Git evidence and next action; exclude secrets and full transcripts. Do not automatically archive or delete completed sessions.
 
 ## Project memory
@@ -49,6 +52,57 @@ Before writer N+1 starts, require writer N's final receipt, manager evidence tha
 On resumption read the checkpoint and native manager before creating anything; reconcile recorded IDs and current Git state. An uncertain creation result is recorded as uncertain, then matched by title, cwd, time and available ID in the manager. Do not retry or start a fallback writer until duplication has been ruled out. If uncertainty cannot be resolved, keep only that dependent launch pending. A clarification requiring additional work closes with `needs_input`; after the user replies, issue a new ID and handoff to the same role. Native tool approvals stay with the execution that requested them.
 
 If the platform cannot provide visible sessions, execute in the main session and disclose in both checkpoint and response: `delegação visível indisponível: <motivo>; especialidade <papel> assumida na sessão principal`. Still record the assignment, handoff and receipt, using an unavailable native ID. This fallback is not independent review and cannot pass the real visible-session acceptance scenario.
+
+## Structured task state (schema v0)
+
+Design rationale, open questions and the full decision log live in `docs/plano-estado-estruturado-e-grafos.md`; this section is the canonical contract once implemented. Nothing below is implemented yet — no `scripts/`, `state.toml` writer or lint exists in the kit. This section documents the target contract so specialists building it, and the reviewer evaluating it, work from one definition instead of re-deriving it from the plan's prose.
+
+A task's mechanical state is `<kit_root>/.agent-state/<project>/tasks/<task>/state.toml`, versioned separately from the narrative `checkpoint.md`: the journal references assignments by `nn` and never repeats a `state.toml` field; `state.toml` never carries reasons, decisions or free text beyond a short `note` per event. A versioned fixture covering the scenarios below lives in `tests/fixtures/visible-sessions/state.toml`.
+
+### Assignment state machine (G2)
+
+States of `assignments[].state`, one terminal transition per predecessor/successor pair; opening the next node is a separate G3 edge chosen by the coordinator, never automatic.
+
+```
+reserved --preflight PASS--> prepared --launch, ID captured--> launched --status--> working --status--> waiting_approval --human attach--> working
+reserved --preflight FAIL--> preparation_failed [terminal]
+prepared --launch, no ID confirmed--> uncertain --reconcile finds session--> launched
+uncertain --reconcile confirms absence--> abandoned [terminal]
+working / waiting_approval --manager done/stopped/failed--> finished --receipt exists--> receipt_received --receipt-lint PASS--> receipt_validated
+finished --terminal, no receipt--> receipt_missing [terminal]
+receipt_received --receipt-lint FAIL--> receipt_invalid [terminal]
+receipt_validated --coordinator accepts--> accepted [terminal]
+receipt_validated --coordinator returns--> returned [terminal]
+receipt_validated --mirrors receipt status--> closed_needs_input / closed_blocked / closed_pending [terminal]
+```
+
+`prepared` counts as an active writer (a second `preflight` cannot prepare a second writer for the same target while one is already `prepared`). `NN` is consumed by every terminal, including `preparation_failed` and `abandoned` — never reused. Only `accepted` establishes acceptance; `closed_pending`, `closed_needs_input`, `closed_blocked`, `receipt_missing` and `receipt_invalid` close the node but require a successor via G3 (`substitui` for the last two) or a user decision. No transition answers a native approval; `waiting_approval → working` is observed, never caused.
+
+### Dependency graph between assignments (G3)
+
+Every node has exactly one `predecessor` (0 for none) and an `edge` naming why it was created:
+
+| `edge` | Valid predecessor state | Target role/mode |
+|---|---|---|
+| `inicia` | none | first assignment of the task |
+| `revisa` | writer in `accepted`/`closed_pending` | `reviewer` (reader) |
+| `revisa_direta` | any closed, or none | reader role (typically `reviewer`) reviewing a change the coordinator made directly outside the graph — her own small docs/config edits, or a follow-up correction to a prior review's findings that she applied herself rather than dispatching a writer |
+| `analisa` | any closed, or none | `architect` / `analista-redmine` / `data-analyst` / same role with `type = análise` |
+| `corrige` | `reviewer` in `accepted` with `verdict = FAIL`, and P_progresso holds | same role as the reviewed writer, `type = correção` |
+| `continua` | `closed_needs_input` (after the user answers) / `closed_pending` | same role, same `type` as predecessor |
+| `substitui` | `preparation_failed` / `abandoned` / `receipt_missing` / `receipt_invalid` | same role, same `type`; predecessor must be a reconciled terminal |
+
+P_writer (writer nodes): no active writer (`prepared`, `launched`, `uncertain`, `working`, `waiting_approval`) across **any** task whose `targets` intersect the new node's; predecessor closed; last writer's receipt on the same targets validated; current `git status/diff` compared to that writer's `git_before` with differences acknowledged in the journal. P_reader (reader nodes): no active writer on the same targets only — readers may overlap readers and role-free discovery. P_progresso: the correction loop (below) does not repeat without new evidence.
+
+The fixture at `tests/fixtures/visible-sessions/state.toml` uses `revisa_direta` for exactly this: a review of the coordinator's own direct edits (predecessor `0`, nothing in the graph to name) and a second review after a coordinator-made correction to the first review's findings (predecessor the prior review, whose closed/`accepted` state is what `revisa_direta` accepts and `revisa`/`continua` do not). Each such node's `note` on its `reserved` event says in one line what it is reviewing and why no writer node exists for it. This dedicated edge, replacing an earlier overloaded reading of `inicia`/`continua`, resolves Finding 1 of the reviewer session `d0edc324` (2026-09-19).
+
+### Correction loop and its stop condition
+
+`writer → reviewer(FAIL) → corrige → reviewer …` continues only while each correction resolves distinct findings. It ends when: the verdict reaches `PASS`/`PASS_WITH_RISKS`; the chain enters `needs_input`/`blocked` pending the user; **or** the reviewer's `risks_digest` for round *k* substantially overlaps round *k-1* (normalized risk titles) — `gate` then refuses `corrige` and offers `analisa` instead, with the coordinator choosing the analysis target. A second consecutive `FAIL` in the same chain — even with distinct findings — requires an explicit user decision recorded in the journal before `corrige` is allowed again; this is a human-in-the-loop checkpoint, not a retry limit.
+
+### Native platform metadata
+
+`native.platform` is `claude`, `codex` or `unavailable`; the last requires a non-empty `reason` and is how the disclosed main-session fallback (above) is represented structurally rather than only in prose. `native.platform = "codex"` requires a non-empty `host` whenever `id` is set.
 
 ## Codex desktop
 
@@ -90,7 +144,7 @@ The per-invocation setting `worktree.bgIsolation: none` allows background edits 
 
 Repeat `--add-dir` for other targets; do not use worktree isolation because assignments share the same local files. Never use `--resume`, `--continue` or `--fork-session` for new assignments. Capture the printed short ID and present it to the user. Monitor with `claude agents --json --all` and inspect details with `claude logs <id>`. Humans use `claude agents` and `claude attach <id>`.
 
-The documented JSON field `state` describes background work: `working`, `blocked`, `done`, `failed`, `stopped`. `state: done` indicates the last turn finished even if the process is alive; `status: idle` or a missing PID alone does not establish completion. `failed` and `stopped` require receipt/Git reconciliation before any replacement. `status: waiting` and `waitingFor: permission prompt` identify a live approval request. Confirm these fields against the installed manager output; interactive sessions may omit them. Use the receipt as the official result, not log scraping.
+The documented JSON field `state` describes background work: `working`, `blocked`, `done`, `failed`, `stopped`. `state: done` indicates the last turn finished even if the process is alive; `status: idle` or a missing PID alone does not establish completion. `failed` and `stopped` require receipt/Git reconciliation before any replacement. `status: waiting` and `waitingFor: permission prompt` identify a live approval request. The session's working directory is the JSON field `cwd` (confirmed directly against the installed manager's output on CLI 2.1.270, 2026-09-19 — every listed session, background and interactive, carries it); `gate`'s cross-task `P_writer` predicate (schema v0, plan §5) filters by `cwd` intersected with a task's `targets`, not by title prefix alone. Confirm these fields against the installed manager output; interactive sessions may omit `state`/`status`/`waitingFor`. Use the receipt as the official result, not log scraping.
 
 Background execution has no human terminal to answer prompts. Every launch explicitly sets `--permission-mode acceptEdits` and an `--allowedTools` derived from that assignment's discovered checks; record exact rules in the checkpoint. This permits file edits under the runtime mode and adds only the listed command approvals. Do not add bare Bash or broad command patterns. Existing managed/user/project permissions still apply: the CLI allowlist is additive, not a replacement policy. If existing broad grants would invalidate the promised outside-allowlist approval behavior, record the incompatibility and resolve it through native controls before claiming that test passed; do not silently rewrite user settings.
 

@@ -15,6 +15,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 - [Skills principais](#skills-principais)
 - [Entrega e autorizações](#entrega-e-autorizações)
 - [Eficiência e verificação](#eficiência-e-verificação)
+- [Ferramentas do kit (`scripts/`)](#ferramentas-do-kit-scripts)
 - [Documentação relacionada](#documentação-relacionada)
 
 ## O que o kit faz e o que não faz
@@ -41,6 +42,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 | Codex desktop | Projeto do kit cadastrado com ambiente `local`; tools `list_projects`, `create_thread`, `wait_threads`, `read_thread`, `list_threads`. |
 | Repositórios-alvo clonados localmente | Caminhos absolutos; o kit não os descobre sozinho. |
 | Ferramentas de build/teste dos alvos no `PATH` | Os checks descobertos precisam resolver no ambiente da sessão em background (ex.: `mvn`, `node`, `go`, `python`). |
+| Python ≥ 3.11 | Só para rodar as ferramentas do próprio kit em `scripts/` (`tomllib` é stdlib a partir dessa versão); não é exigido para delegar tarefas aos especialistas. |
 
 ## Início rápido
 
@@ -99,6 +101,7 @@ Se a plataforma não conseguir abrir sessões visíveis, a sessão principal ass
 | `python-etl` | Python ETL: ingestão, transformação, carga, recuperação | Escopo atribuído |
 | **node-backend** | Node.js/TypeScript: BFFs, APIs, integrações upstream | Escopo atribuído |
 | `data-analyst` | Análise de dados: SQL reproduzível, notebooks, métricas, reconciliação | Escopo atribuído |
+| `kit-tooling` | Ferramentas do próprio kit em `scripts/` (Python stdlib) — nunca código de aplicação-alvo | `scripts/`, `tests/`, nunca um alvo |
 | `architect` | Arquitetura: decisões materiais, contratos compartilhados, migrations, backfills | Não (só o próprio receipt) |
 | `reviewer` | Revisão independente por risco: correção, segurança, integridade, compatibilidade, testes | Não (só o próprio receipt) |
 | **analista-redmine** | Opcional: histórico complexo de tarefas, requisitos atuais, trabalho restante | Não (só o próprio receipt) |
@@ -284,7 +287,21 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 - Carregue só as instruções e skills relevantes; reutilize descobertas e extratos de PDF; roteie de forma estreita e revise por consequência.
 - Teste o comportamento alterado proporcionalmente com os comandos descobertos no projeto; reporte resultados exatos e checks pulados. Não adicione testes que apenas repetem mudanças de texto de baixo impacto.
 - Meça tokens reais apenas quando o runtime os expõe; menos agentes ou menos bytes não são um percentual de economia.
-- O kit não possui um validador permanente de customizações. Avalie mudanças com checks estruturais direcionados (parse de TOML/YAML, paridade `.codex`/`.claude`, `git diff --check`) e simulações realistas de tarefa, reportando honestamente os checks de runtime não executados. Uma proposta de scripts de apoio está em [docs/analise-scripts-apoio-coordenacao.md](docs/analise-scripts-apoio-coordenacao.md).
+- O kit tem um validador estrutural em `scripts/kit_lint.py` (Python 3 stdlib, ver [Ferramentas do kit](#ferramentas-do-kit-scripts)) que checa paridade `.codex`/`.claude`, identidade de skills, `git diff --check` e roda a suíte de testes — mas ele não substitui uma simulação realista de tarefa nem prova comportamento de runtime; reporte honestamente o que não foi exercitado. O racional completo e o roteiro de scripts ainda pendentes estão em [docs/analise-scripts-apoio-coordenacao.md](docs/analise-scripts-apoio-coordenacao.md) e [docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md).
+
+## Ferramentas do kit (`scripts/`)
+
+Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem dependência externa. Cobrem a Etapa 1 do modelo de estado estruturado ([docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md)); rode todos a partir da raiz do kit:
+
+| Comando | O que faz |
+|---|---|
+| `python3 scripts/kit_lint.py` | Paridade de perfis `.codex`↔`.claude`, identidade de skills, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture, e roda a suíte `unittest` |
+| `python3 -m unittest discover -s tests` | Suíte de testes isolada (fixtures em `tests/fixtures/`, nunca o `.agent-state/` real) |
+| `python3 scripts/state_lint.py [caminho/state.toml]` | As 8 invariantes do schema v0 (seção 5 do plano); usa a fixture versionada se nenhum caminho for informado |
+| `python3 scripts/preflight.py` | Gate de preparação `reserved → prepared \| preparation_failed` (seção 4.1 da análise) |
+| `python3 scripts/receipt_lint.py <receipt> --handoff <handoff>` | Valida a forma de um receipt e extrai `risks_digest` |
+
+Estes scripts formalizam checks mecânicos; roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da coordenadora. Nenhum lança sessões nem responde aprovações nativas. `gate`, `launch-claude`, `status-claude`, `watch-claude`, `reconcile` e `handoff new` (Etapas 2–3) ainda não existem — ver o papel `kit-tooling` na tabela de equipe.
 
 ## Documentação relacionada
 
@@ -294,5 +311,6 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 | [CLAUDE.md](CLAUDE.md) | Particularidades do runtime Claude Code (importa `AGENTS.md`) |
 | [docs/agent-workflow.md](docs/agent-workflow.md) | Papéis, handoffs, procedimento de lançamento/monitoramento por plataforma, aceitação e cenários de avaliação |
 | [docs/analise-scripts-apoio-coordenacao.md](docs/analise-scripts-apoio-coordenacao.md) | Análise de scripts auxiliares para o fluxo da coordenadora: casos de uso, benefícios, riscos e roteiro |
+| [docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md) | Schema v0 do estado estruturado (`state.toml`), grafos G1/G2/G3, decisões confirmadas e roteiro por etapas — Etapas 0 e 1 implementadas em `scripts/` |
 | `.claude/skills/*/SKILL.md` e `.agents/skills/*/SKILL.md` | Texto completo de cada skill, com templates e referências |
 | `.claude/instructions/` e `.codex/instructions/` | Instruções de domínio por responsabilidade de módulo |
