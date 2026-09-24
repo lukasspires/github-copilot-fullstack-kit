@@ -55,7 +55,7 @@ If the platform cannot provide visible sessions, execute in the main session and
 
 ## Structured task state (schema v0)
 
-Design rationale, open questions and the full decision log live in `docs/plano-estado-estruturado-e-grafos.md`; this section is the canonical contract once implemented. Nothing below is implemented yet — no `scripts/`, `state.toml` writer or lint exists in the kit. This section documents the target contract so specialists building it, and the reviewer evaluating it, work from one definition instead of re-deriving it from the plan's prose.
+Design rationale, open questions and the full decision log live in `docs/plano-estado-estruturado-e-grafos.md`; this section is the canonical contract. Implemented as of commit `a01ab93` (2026-09-19): `scripts/state/` (init/add/set/next-nn), `scripts/preflight.py`, `scripts/gate.py`, `scripts/launch_claude.py`, `scripts/status_claude.py`, `scripts/watch_claude.py`, `scripts/receipt_lint.py`, `scripts/state_lint.py` and `scripts/kit_lint.py`, all with `unittest` coverage over `tests/fixtures/`. `reconcile` and `handoff new` remain unimplemented — see `docs/plano-unificado.md` for the full checklist. This section documents the contract so specialists building on it, and the reviewer evaluating it, work from one definition instead of re-deriving it from the plan's prose.
 
 A task's mechanical state is `<kit_root>/.agent-state/<project>/tasks/<task>/state.toml`, versioned separately from the narrative `checkpoint.md`: the journal references assignments by `nn` and never repeats a `state.toml` field; `state.toml` never carries reasons, decisions or free text beyond a short `note` per event. A versioned fixture covering the scenarios below lives in `tests/fixtures/visible-sessions/state.toml`.
 

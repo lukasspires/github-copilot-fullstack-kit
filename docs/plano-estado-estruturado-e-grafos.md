@@ -1,8 +1,10 @@
 # Plano: estado estruturado e grafos do fluxo da coordenadora
 
+> Este documento é racional histórico. A narrativa unificada e atualizada (status real, checklist do que está implementado) está em [`plano-unificado.md`](plano-unificado.md). O contrato vivo do schema v0 (G2/G3) está em [`docs/agent-workflow.md` §"Structured task state (schema v0)"](agent-workflow.md#structured-task-state-schema-v0).
+
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `5abaed8`)
-- **Status:** Etapa 0 concluída em 2026-09-19 (schema v0 documentado como contrato em `docs/agent-workflow.md`, fixture versionada em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS` — tarefa `structured-state`, receipts `01`/`02`). Etapas 1–3 (scripts) não iniciadas; nenhum código existe ainda.
+- **Status:** Etapas 0–2 concluídas e commitadas em `a01ab93` (2026-09-19): schema v0 documentado como contrato em `docs/agent-workflow.md`, fixture versionada em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS` (tarefa `structured-state`, receipts `01`/`02`), e `scripts/` inteiro (`state`, `preflight`, `gate`, `launch-claude`, `status-claude`, `watch-claude`, `receipt-lint`, `state-lint`, `kit-lint`) implementado, testado e validado numa cadeia real de dispatch. Etapa 3 (`reconcile`, `handoff new`, hook `PreToolUse`) não iniciada. Ver checklist completo em `docs/plano-unificado.md`.
 - **Base:** [`analise-scripts-apoio-coordenacao.md`](analise-scripts-apoio-coordenacao.md) (seções 4, 9, 10 e 12)
 - **Escopo:** definir o estado estruturado de uma tarefa como estado de um grafo, planejar os grafos e loops do fluxo, e reordenar o roteiro da análise a partir desse modelo
 

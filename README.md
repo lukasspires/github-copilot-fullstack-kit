@@ -291,17 +291,22 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 
 ## Ferramentas do kit (`scripts/`)
 
-Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem dependência externa. Cobrem a Etapa 1 do modelo de estado estruturado ([docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md)); rode todos a partir da raiz do kit:
+Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem dependência externa. Cobrem as Etapas 1–2 do modelo de estado estruturado ([docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md); status real consolidado em [docs/plano-unificado.md](docs/plano-unificado.md)); rode todos a partir da raiz do kit:
 
 | Comando | O que faz |
 |---|---|
 | `python3 scripts/kit_lint.py` | Paridade de perfis `.codex`↔`.claude`, identidade de skills, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture, e roda a suíte `unittest` |
 | `python3 -m unittest discover -s tests` | Suíte de testes isolada (fixtures em `tests/fixtures/`, nunca o `.agent-state/` real) |
+| `python3 -m scripts.state {init,add,set,next-nn} ...` | Cria/reserva/atualiza nós de `state.toml` — o estado mecânico do grafo de uma tarefa |
 | `python3 scripts/state_lint.py [caminho/state.toml]` | As 8 invariantes do schema v0 (seção 5 do plano); usa a fixture versionada se nenhum caminho for informado |
 | `python3 scripts/preflight.py` | Gate de preparação `reserved → prepared \| preparation_failed` (seção 4.1 da análise) |
+| `python3 scripts/gate.py --state ... --role ... --type ... --edge ... --predecessor ...` | Responde sim/não (com motivos) para a aresta G3 proposta (`P_writer`/`P_reader`/`P_progresso`); nunca escreve |
+| `python3 scripts/launch_claude.py --state ... --nn ...` | Monta e valida o comando `claude --bg ...` (flags forçadas, flags proibidas recusadas), encadeia `preflight` |
+| `python3 scripts/status_claude.py [--nn ...] [--state ...]` | Observa o manager (`claude agents --json --all`), valida o schema do JSON, imprime `claude attach <id>` em vez de agir |
+| `python3 scripts/watch_claude.py --interval ... --max-duration ... [--nn ...] [--state ...]` | Polling limitado em torno de `status-claude`; sai ao observar uma transição ou aprovação pendente, nunca age |
 | `python3 scripts/receipt_lint.py <receipt> --handoff <handoff>` | Valida a forma de um receipt e extrai `risks_digest` |
 
-Estes scripts formalizam checks mecânicos; roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da coordenadora. Nenhum lança sessões nem responde aprovações nativas. `gate`, `launch-claude`, `status-claude`, `watch-claude`, `reconcile` e `handoff new` (Etapas 2–3) ainda não existem — ver o papel `kit-tooling` na tabela de equipe.
+Estes scripts formalizam checks mecânicos; roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da coordenadora. Nenhum lança sessões automaticamente encadeadas nem responde aprovações nativas. `reconcile` e `handoff new` (Etapa 3) ainda não existem — ver o papel `kit-tooling` na tabela de equipe.
 
 ## Documentação relacionada
 

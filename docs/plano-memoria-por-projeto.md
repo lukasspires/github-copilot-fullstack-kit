@@ -1,8 +1,10 @@
 # Plano: estado e memória por projeto em `.agent-state/`
 
+> Este documento é racional histórico. A narrativa unificada e atualizada (status real, checklist do que está implementado) está em [`plano-unificado.md`](plano-unificado.md). O contrato vivo do layout de memória está em [`docs/agent-workflow.md` §"Project memory"](agent-workflow.md#project-memory).
+
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `0b72cdf`)
-- **Status:** executado nesta branch (etapas 1–9 abaixo); sem commit
+- **Status:** executado e commitado em `b695062` (2026-09-18); etapas 1–9 abaixo concluídas
 - **Base:** conversa externa "Estrutura de pastas" (ChatGPT, 2026-09-18) e o checkpoint real da tarefa #5233
 - **Escopo:** separar por projeto os arquivos que o kit gera (checkpoints, handoffs, receipts, anexos) e introduzir uma memória estável por projeto, sem alterar o protocolo de sessões visíveis nem a fronteira de escrita dos especialistas
 

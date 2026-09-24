@@ -1,5 +1,7 @@
 # Análise: scripts auxiliares de apoio ao fluxo da coordenadora
 
+> Este documento é racional histórico. A narrativa unificada e atualizada (status real, checklist do que está implementado) está em [`plano-unificado.md`](plano-unificado.md).
+
 - **Data:** 2026-09-16
 - **Branch analisada:** `feat/independent-visible-sessions` (HEAD `d18d37e`)
 - **Status:** proposta de avaliação; nenhum script foi implementado
