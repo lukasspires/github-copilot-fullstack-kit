@@ -30,7 +30,7 @@ READER_ROLES = frozenset({"reviewer", "architect", "analista-redmine"})
 NATIVE_PLATFORMS = frozenset({"claude", "codex", "unavailable"})
 ASSIGNMENT_TYPES = frozenset({"implementação", "revisão", "correção", "análise"})
 ASSIGNMENT_MODES = frozenset({"writer", "reader"})
-EDGES = frozenset({"inicia", "revisa", "revisa_direta", "analisa", "corrige", "continua", "substitui"})
+EDGES = frozenset({"inicia", "revisa", "revisa_direta", "analisa", "corrige", "continua", "substitui", "prossegue"})
 
 # G2 states (docs/agent-workflow.md "Assignment state machine (G2)").
 ACTIVE_WRITER_STATES = frozenset({"prepared", "launched", "uncertain", "working", "waiting_approval"})

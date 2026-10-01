@@ -159,7 +159,9 @@ def build_argv(
 
     Never accepts `--permission-mode`/`--settings` overrides from the
     caller — those two are always the fixed, authorized values
-    (`acceptEdits` / `{"worktree":{"bgIsolation":"none"}}`); `extra_args`
+    (`auto` / `{"worktree":{"bgIsolation":"none"}}`). `auto` is a distinct
+    mode, NOT `bypassPermissions`; the ban on `bypassPermissions` and
+    `--permission-prompts` still applies unchanged. `extra_args`
     exists only so a caller can pass through additional, ordinary
     `claude` flags a future assignment might need, and is itself screened
     against `FORBIDDEN_EXTRA_ARG_TOKENS` before being appended.
@@ -173,7 +175,7 @@ def build_argv(
     for target in handoff.targets:
         argv += ["--add-dir", target]
     argv += ["--settings", '{"worktree":{"bgIsolation":"none"}}']
-    argv += ["--permission-mode", "acceptEdits"]
+    argv += ["--permission-mode", "auto"]
     if handoff.allowlist:
         argv += ["--allowedTools", *handoff.allowlist]
     argv += extra_args

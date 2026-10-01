@@ -109,6 +109,23 @@ def check_edge_compatibility(doc: StateDoc) -> list[str]:
                 errors.append(
                     f"nn={a.nn}: edge=continua requires predecessor in closed_needs_input/closed_pending, got {got!r}"
                 )
+        elif a.edge == "prossegue":
+            if pred is None or pred.state != "accepted":
+                got = pred.state if pred else None
+                errors.append(
+                    f"nn={a.nn}: edge=prossegue requires predecessor in accepted, got {got!r}"
+                )
+            else:
+                if a.role != pred.role:
+                    errors.append(
+                        f"nn={a.nn}: edge=prossegue requires the same role as predecessor "
+                        f"{pred.nn} ({pred.role!r}), got {a.role!r}"
+                    )
+                if a.type != pred.type:
+                    errors.append(
+                        f"nn={a.nn}: edge=prossegue requires the same type as predecessor "
+                        f"{pred.nn} ({pred.type!r}), got {a.type!r}"
+                    )
         elif a.edge == "substitui":
             if pred is None or pred.state not in _TERMINAL_WITHOUT_RESULT:
                 got = pred.state if pred else None

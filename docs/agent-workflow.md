@@ -90,6 +90,7 @@ Every node has exactly one `predecessor` (0 for none) and an `edge` naming why i
 | `analisa` | any closed, or none | `architect` / `analista-redmine` / `data-analyst` / same role with `type = análise` |
 | `corrige` | `reviewer` in `accepted` with `verdict = FAIL`, and P_progresso holds | same role as the reviewed writer, `type = correção` |
 | `continua` | `closed_needs_input` (after the user answers) / `closed_pending` | same role, same `type` as predecessor |
+| `prossegue` | writer in `accepted` | same role, same `type`; the next block of a multi-stage implementation whose predecessor fully met its own acceptance |
 | `substitui` | `preparation_failed` / `abandoned` / `receipt_missing` / `receipt_invalid` | same role, same `type`; predecessor must be a reconciled terminal |
 
 P_writer (writer nodes): no active writer (`prepared`, `launched`, `uncertain`, `working`, `waiting_approval`) across **any** task whose `targets` intersect the new node's; predecessor closed; last writer's receipt on the same targets validated; current `git status/diff` compared to that writer's `git_before` with differences acknowledged in the journal. P_reader (reader nodes): no active writer on the same targets only — readers may overlap readers and role-free discovery. P_progresso: the correction loop (below) does not repeat without new evidence.
@@ -135,7 +136,7 @@ claude --bg --agent java-backend \
   --name "redmine-1234 — java-backend — 01 — implementação" \
   --add-dir /absolute/api \
   --settings '{"worktree":{"bgIsolation":"none"}}' \
-  --permission-mode acceptEdits \
+  --permission-mode auto \
   --allowedTools "Bash(mvn test)" \
   -- "Act as java-backend. Read /absolute/kit/.claude/agents/java-backend.md and /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md, then execute."
 ```
@@ -146,7 +147,7 @@ Repeat `--add-dir` for other targets; do not use worktree isolation because assi
 
 The documented JSON field `state` describes background work: `working`, `blocked`, `done`, `failed`, `stopped`. `state: done` indicates the last turn finished even if the process is alive; `status: idle` or a missing PID alone does not establish completion. `failed` and `stopped` require receipt/Git reconciliation before any replacement. `status: waiting` and `waitingFor: permission prompt` identify a live approval request. The session's working directory is the JSON field `cwd` (confirmed directly against the installed manager's output on CLI 2.1.270, 2026-09-19 — every listed session, background and interactive, carries it); `gate`'s cross-task `P_writer` predicate (schema v0, plan §5) filters by `cwd` intersected with a task's `targets`, not by title prefix alone. Confirm these fields against the installed manager output; interactive sessions may omit `state`/`status`/`waitingFor`. Use the receipt as the official result, not log scraping.
 
-Background execution has no human terminal to answer prompts. Every launch explicitly sets `--permission-mode acceptEdits` and an `--allowedTools` derived from that assignment's discovered checks; record exact rules in the checkpoint. This permits file edits under the runtime mode and adds only the listed command approvals. Do not add bare Bash or broad command patterns. Existing managed/user/project permissions still apply: the CLI allowlist is additive, not a replacement policy. If existing broad grants would invalidate the promised outside-allowlist approval behavior, record the incompatibility and resolve it through native controls before claiming that test passed; do not silently rewrite user settings.
+Background execution has no human terminal to answer prompts. Every launch explicitly sets `--permission-mode auto` and an `--allowedTools` derived from that assignment's discovered checks; record exact rules in the checkpoint. This permits file edits under the runtime mode and adds only the listed command approvals. Do not add bare Bash or broad command patterns. Existing managed/user/project permissions still apply: the CLI allowlist is additive, not a replacement policy. If existing broad grants would invalidate the promised outside-allowlist approval behavior, record the incompatibility and resolve it through native controls before claiming that test passed; do not silently rewrite user settings.
 
 Commands outside the allowlist that require approval remain pending. The coordinator reports the exact command and ID, and the user answers through `claude attach <id>`. Never use `bypassPermissions` or `--permission-prompts none`, and never answer a native approval on the user's behalf. Do not carry per-assignment tool approvals to the next invocation; task-level development authorization remains scoped and separate.
 

@@ -67,7 +67,7 @@ Cada atribuição — implementação, revisão, correção ou análise — exig
 | 3 | Reserva de NN | Escolher o próximo número sequencial; nunca reutilizar após falha | Mecânico |
 | 4 | Handoff | Escrever `.agent-state/<task>/<NN>-<role>-handoff.md` com ~14 campos obrigatórios (objetivo, perfil absoluto, roots, instruções do alvo, write set, contratos, evidência, autorizações, critérios, checks, predecessor, receipt path, allowlist, aviso de preservação) | Mecânico (estrutura) + julgamento (conteúdo) |
 | 5 | Gate de preparação | Handoff legível; perfil existe; instruções do alvo existem; diretório de receipt existe; executáveis dos checks resolvem no ambiente; `git status/diff` gravado; nenhum outro writer ativo no manager | **Mecânico** |
-| 6 | Lançamento | Claude: `claude --bg --agent --name --add-dir… --settings '{"worktree":{"bgIsolation":"none"}}' --permission-mode acceptEdits --allowedTools … -- "prompt"`. Codex: `create_thread` via MCP com `environment.type=local` | Mecânico |
+| 6 | Lançamento | Claude: `claude --bg --agent --name --add-dir… --settings '{"worktree":{"bgIsolation":"none"}}' --permission-mode auto --allowedTools … -- "prompt"`. Codex: `create_thread` via MCP com `environment.type=local` | Mecânico |
 | 7 | Registro do ID | Capturar o ID curto/threadId e gravar imediatamente no checkpoint | Mecânico |
 | 8 | Monitoramento | `claude agents --json --all`, `claude logs <id>`; detectar `status: waiting` + `waitingFor: permission prompt` e reportar `claude attach <id>` ao usuário | Mecânico |
 | 9 | Gate de liberação do writer N+1 | Receipt final do predecessor existe; manager indica `done`/`stopped`/`failed`; `git status/diff` conferido contra o snapshot; nenhuma sessão desconhecida no mesmo cwd/alvo | **Mecânico** |
@@ -150,7 +150,7 @@ Ordenados por valor esperado, considerando evidência de falha, frequência de u
 - **Plataforma:** Claude apenas (Codex é MCP, não shell)
 - **Comportamento:**
   - deriva `--agent`, `--name "<task> — <role> — <NN> — <type>"`, `--add-dir` (repetido por alvo), `--allowedTools` e o prompt curto a partir do handoff
-  - força `--settings '{"worktree":{"bgIsolation":"none"}}'` e `--permission-mode acceptEdits`
+  - força `--settings '{"worktree":{"bgIsolation":"none"}}'` e `--permission-mode auto`
   - **recusa** `bypassPermissions`, `--permission-prompts none`, `--resume`, `--continue`, `--fork-session`
   - recusa padrões amplos de allowlist (`Bash`, `Bash(*)`)
   - executa `preflight` antes; qualquer falha aborta (`set -euo pipefail`)

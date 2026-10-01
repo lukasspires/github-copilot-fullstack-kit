@@ -69,7 +69,7 @@ EXPECTED_DOC_ARGV = [
     "--settings",
     '{"worktree":{"bgIsolation":"none"}}',
     "--permission-mode",
-    "acceptEdits",
+    "auto",
     "--allowedTools",
     "Bash(mvn test)",
     "--",
@@ -116,6 +116,20 @@ class ForbiddenConstructionTests(unittest.TestCase):
         if allowlist is not None:
             data.allowlist = allowlist
         return data
+
+    def test_default_argv_never_emits_bypass_or_permission_prompts(self):
+        """Regression: switching the fixed mode to `auto` must not loosen
+        the ban. No emitted token may contain `bypassPermissions` or
+        `--permission-prompts`, and the mode value is exactly `auto`."""
+        argv = launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--verbose"])
+        for token in argv:
+            self.assertNotIn("bypassPermissions", token)
+            self.assertNotIn("--permission-prompts", token)
+        self.assertEqual(argv.count("--permission-mode"), 1)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")
+        self.assertIn("bypassPermissions", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
+        self.assertIn("--permission-prompts", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
+        self.assertNotIn("auto", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
 
     def test_refuses_bypass_permissions(self):
         with self.assertRaises(launch_claude.LaunchRefused):
