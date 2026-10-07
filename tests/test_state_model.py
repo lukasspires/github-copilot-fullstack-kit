@@ -30,7 +30,7 @@ class ModeForRoleTests(unittest.TestCase):
             self.assertEqual(mode_for_role(role), "reader")
 
     def test_writer_roles(self):
-        for role in ("node-backend", "kit-tooling", "angular", "coordinator"):
+        for role in ("node-backend", "kit-tooling", "angular", "marina"):
             self.assertEqual(mode_for_role(role), "writer")
 
 

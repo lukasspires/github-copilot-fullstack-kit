@@ -7,7 +7,7 @@ Implements docs/agent-workflow.md's "Dependency graph between assignments
 in `state.toml` yet. Answers yes/no with reasons only — never creates a
 node, never transitions anything, never launches a session. `state add`
 (scripts/state) is the only thing that actually reserves a node, and only
-after `gate` (or the coordinator's own judgment) says yes.
+after `gate` (or marina's own judgment) says yes.
 
 Minimum tested Claude CLI version: 2.1.270 (only used, optionally and
 non-fatally, to list `claude agents --json --all` for the unknown-working

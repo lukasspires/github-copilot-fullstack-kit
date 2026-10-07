@@ -111,7 +111,7 @@ class InitStateTests(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
         self.state_path = Path(self.tmpdir.name) / "tasks" / "demo-task" / "state.toml"
-        # Mirrors the real precondition: the coordinator already created the
+        # Mirrors the real precondition: marina already created the
         # task directory (for handoffs/receipts) before running `state init`.
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
 

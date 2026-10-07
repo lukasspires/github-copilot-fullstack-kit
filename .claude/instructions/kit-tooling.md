@@ -10,7 +10,7 @@
 - Never respond to a native approval prompt from inside a script; print the exact `claude attach <id>` instruction for the human instead.
 - One launch/dispatch per script invocation; never chain a second writer automatically.
 - Refuse to construct `bypassPermissions`, `--permission-prompts none`, `--resume`, `--continue`, `--fork-session`, or a broad allowlist pattern (bare `Bash`, `Bash(*)`).
-- Output must be readable by both a human and the coordinator, with a meaningful process exit code; an optional `--json` mode is allowed but never required.
+- Output must be readable by both a human and Marina, with a meaningful process exit code; an optional `--json` mode is allowed but never required.
 - Validate any external schema explicitly (the native session manager's JSON fields in particular) and fail loudly on drift; do not silently tolerate a missing or renamed field.
 - Declare the minimum tested CLI version in each script's header; `kit-lint` checks it against the installed `claude --version`.
 - Sanitize all output and any file written under `.agent-state/`: enumerated fields only, never a full environment dump, transcript, or complete log.

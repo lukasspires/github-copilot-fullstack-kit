@@ -45,7 +45,7 @@ last_seen = ""
 at = 2026-01-01T10:00:00+00:00
 from = ""
 to = "reserved"
-by = "coordinator"
+by = "marina"
 note = ""
 
 [[assignments.events]]

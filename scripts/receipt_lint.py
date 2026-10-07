@@ -9,7 +9,7 @@ two accepted profile/instructions shapes and the narrow inline
 status/verdict fallback) — and extracts `receipt_summary`/`risks_digest`
 by parsing normalized risk titles out of `## Risks` / `### RISK n`
 headings (docs/plano-estado-estruturado-e-grafos.md §2.3/§2.4). Never
-evaluates merit, only form (docs/analise-scripts-apoio-coordenacao.md
+evaluates merit, only form (docs/analise-scripts-apoio-marina.md
 §4.5).
 
 Minimum tested Claude CLI version: none (neutral script; no native CLI

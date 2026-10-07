@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/preflight.py — G2 transition `reserved -> prepared | preparation_failed`.
 
-Runs exactly the P0 checks of docs/analise-scripts-apoio-coordenacao.md
+Runs exactly the P0 checks of docs/analise-scripts-apoio-marina.md
 §4.1 for one assignment already recorded as `reserved` in `state.toml`,
 then appends the observed transition. Never launches anything.
 
@@ -63,7 +63,7 @@ def _extract_check_commands(allowlist: list[str]) -> list[str]:
 
     E.g. "Bash(cd /x && node --test)" -> ["node"]; "Bash(git status --short)"
     -> ["git"]. Used to check each check executable resolves via `which`
-    (docs/analise-scripts-apoio-coordenacao.md §4.1: "cada executável dos
+    (docs/analise-scripts-apoio-marina.md §4.1: "cada executável dos
     checks resolve via `command -v`").
     """
 
@@ -122,7 +122,7 @@ def run_preflight(
     if assignment.state != "reserved":
         raise StateError(f"nn={nn} is not in state 'reserved' (found {assignment.state!r}); preflight only runs once")
 
-    # slug/project format (docs/analise-scripts-apoio-coordenacao.md §4.1).
+    # slug/project format (docs/analise-scripts-apoio-marina.md §4.1).
     if not _SLUG_RE.match(doc.task.slug):
         reasons.append(f"task.slug {doc.task.slug!r} does not match ^[a-z0-9-]+$")
     if not _SLUG_RE.match(doc.task.project):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """scripts/kit_lint.py — the kit's own static checks
-(docs/analise-scripts-apoio-coordenacao.md §4.7), plus `state-lint`.
+(docs/analise-scripts-apoio-marina.md §4.7), plus `state-lint`.
 
 Checks: `.claude/agents/*.md` <-> `.codex/agents/*.toml` parse and body
 parity; `.claude/instructions/` <-> `.codex/instructions/` byte identity;

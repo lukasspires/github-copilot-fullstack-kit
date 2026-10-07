@@ -50,7 +50,7 @@ TERMINAL_STATES = frozenset(
 ALL_STATES = frozenset({"reserved", "finished", "receipt_received", "receipt_validated"}) | ACTIVE_WRITER_STATES | TERMINAL_STATES
 
 # G2 transition table: from -> allowed set of "to" states. Only the
-# transitions a script or the coordinator may record; `waiting_approval ->
+# transitions a script or marina may record; `waiting_approval ->
 # working` is observed (by `status`), never caused, but is still a valid
 # recorded transition.
 G2_TRANSITIONS: dict[str, frozenset[str]] = {

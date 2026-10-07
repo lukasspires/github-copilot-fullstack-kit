@@ -7,8 +7,8 @@ Minimum tested Claude CLI version: none (neutral script; no native CLI
 invoked).
 
 Read-only: never writes anything. `kit-lint` runs this against the
-fixture as one of its checks (docs/analise-scripts-apoio-coordenacao.md
-§4.7); the coordinator/`gate` (Etapa 2, out of scope here) would also run
+fixture as one of its checks (docs/analise-scripts-apoio-marina.md
+§4.7); marina/`gate` (Etapa 2, out of scope here) would also run
 it against the real `state.toml` before any G3 transition.
 """
 

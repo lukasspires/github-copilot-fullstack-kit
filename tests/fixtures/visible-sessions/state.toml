@@ -51,7 +51,7 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
   at   = 2026-09-11T11:00:00-03:00
   from = ""
   to   = "reserved"
-  by   = "coordinator"
+  by   = "marina"
   note = ""
 
   [[assignments.events]]
@@ -106,7 +106,7 @@ allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
   at   = 2026-09-11T11:30:00-03:00
   from = ""
   to   = "reserved"
-  by   = "coordinator"
+  by   = "marina"
   note = "revisa edições diretas da coordenadora (docs/config do kit); nn=1 falhou preparação e não produziu diff, logo não há nó writer para revisar"
 
   [[assignments.events]]
@@ -162,7 +162,7 @@ allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
   at   = 2026-09-11T14:00:00-03:00
   from = "receipt_validated"
   to   = "accepted"
-  by   = "coordinator"
+  by   = "marina"
   note = "PASS_WITH_RISKS aceito; riscos registrados para acompanhamento, nenhum bloqueante"
 
 # ---- nn=3 — revisão, waiting_approval -> accepted, PASS_WITH_RISKS --------
@@ -199,7 +199,7 @@ allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --sh
   verdict      = "PASS_WITH_RISKS"
   profile_ok   = true
   risks_digest = [
-    "preparation gate effectiveness depends on coordinator discipline",
+    "preparation gate effectiveness depends on marina discipline",
     "worktree bgisolation setting not yet validated in practice",
     "carrying forward unexecuted scenario risk from assignment 02",
     "permission model still relies on instructions rather than tooling",
@@ -209,7 +209,7 @@ allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --sh
   at   = 2026-09-11T15:00:00-03:00
   from = ""
   to   = "reserved"
-  by   = "coordinator"
+  by   = "marina"
   note = "revisa correções que a coordenadora aplicou diretamente em resposta aos riscos do nó 2; não há nó writer intermediário"
 
   [[assignments.events]]
@@ -265,7 +265,7 @@ allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --sh
   at   = 2026-09-11T17:00:00-03:00
   from = "receipt_validated"
   to   = "accepted"
-  by   = "coordinator"
+  by   = "marina"
   note = "PASS_WITH_RISKS aceito; riscos remanescentes (execução real de cadeia de 4 sessões) permanecem em aberto no checkpoint"
 
 # ---- nn=4 — análise, platform=unavailable (fallback Codex) ----------------
@@ -308,14 +308,14 @@ allowlist   = []
   at   = 2026-09-11T17:50:00-03:00
   from = ""
   to   = "reserved"
-  by   = "coordinator"
+  by   = "marina"
   note = ""
 
   [[assignments.events]]
   at   = 2026-09-11T18:00:00-03:00
   from = "reserved"
   to   = "accepted"
-  by   = "coordinator"
+  by   = "marina"
   note = "delegação visível indisponível: restrição do ambiente; especialidade de validação Codex assumida na sessão principal; não substitui a cadeia real Codex exigida pelo critério de aceitação"
 
 # ---- nn=5 — implementação, uncertain -> abandoned (SINTÉTICO) --------------
@@ -350,7 +350,7 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
   at   = 2026-09-13T10:00:00-03:00
   from = ""
   to   = "reserved"
-  by   = "coordinator"
+  by   = "marina"
   note = "nó sintético, criado só para fixture de teste"
 
   [[assignments.events]]

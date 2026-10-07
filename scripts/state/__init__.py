@@ -9,7 +9,7 @@ CLI, run `python3 -m scripts.state <init|add|set|next-nn> ...` (see
 `scripts/state/__main__.py`).
 
 Judgment (routing, accept/return decisions, edge choice) is never made
-here — only the coordinator or another script (`preflight`, `receipt-lint`)
+here — only marina or another script (`preflight`, `receipt-lint`)
 appends events with an explicit `by`.
 """
 
@@ -201,7 +201,7 @@ def add_assignment(
     reason: str = "",
     allowlist: Iterable[str] | None = None,
     note: str = "",
-    by: str = "coordinator",
+    by: str = "marina",
     at: datetime.datetime | None = None,
 ) -> Assignment:
     """`state add` — reserve a new assignment node in `reserved`.
@@ -209,7 +209,7 @@ def add_assignment(
     Derives `nn` (from `task.next_nn`), `mode` (from `role`), `title`,
     `handoff` and `receipt` (by convention from `task.slug`/`task.journal`)
     exactly as docs/plano-estado-estruturado-e-grafos.md §2.4 specifies;
-    the coordinator only supplies the judgment fields (`role`, `type`,
+    marina only supplies the judgment fields (`role`, `type`,
     `edge`, `predecessor`, `targets`, `allowlist`, native platform).
     """
 
@@ -264,11 +264,11 @@ def set_state(
     nn: int,
     to_state: str,
     *,
-    by: str = "coordinator",
+    by: str = "marina",
     note: str = "",
     at: datetime.datetime | None = None,
 ) -> Assignment:
-    """`state set` — record a coordinator judgment transition (or any
+    """`state set` — record a marina judgment transition (or any
     other explicit, legal G2 transition) for an existing node."""
 
     assignment = doc.get_assignment(nn)

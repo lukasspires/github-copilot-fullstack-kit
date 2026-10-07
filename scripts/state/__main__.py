@@ -111,11 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_p.add_argument("--at", default=None, help="ISO 8601 timestamp override (tests only)")
     add_p.set_defaults(func=cmd_add)
 
-    set_p = sub.add_parser("set", help="record a coordinator judgment (or observed) G2 transition")
+    set_p = sub.add_parser("set", help="record a marina judgment (or observed) G2 transition")
     set_p.add_argument("--state", required=True)
     set_p.add_argument("--nn", required=True, type=int)
     set_p.add_argument("--to", required=True)
-    set_p.add_argument("--by", default="coordinator")
+    set_p.add_argument("--by", default="marina")
     set_p.add_argument("--note", default="")
     set_p.add_argument("--at", default=None)
     set_p.set_defaults(func=cmd_set)

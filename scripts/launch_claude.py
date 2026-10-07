@@ -51,7 +51,7 @@ from scripts.state.model import StateError
 CANONICAL_PROMPT = "Act as {role}. Read {profile} and {handoff}, then execute the assignment."
 
 # The five behaviors this script must never construct (plan §5 P0 /
-# docs/analise-scripts-apoio-coordenacao.md §10 "Flags proibidas"), plus a
+# docs/analise-scripts-apoio-marina.md §10 "Flags proibidas"), plus a
 # bare/wildcard allowlist entry, checked separately against the parsed
 # handoff's own `allowlist`.
 FORBIDDEN_EXTRA_ARG_TOKENS: tuple[str, ...] = (
