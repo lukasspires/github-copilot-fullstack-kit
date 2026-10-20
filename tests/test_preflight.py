@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 import scripts.state as st
-from scripts import preflight
+from scripts import handoff_sync, preflight
 
 AT = datetime.datetime(2026, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -154,6 +154,218 @@ class Node1RegressionTest(unittest.TestCase):
 
 
 class PositivePreflightTest(unittest.TestCase):
+    def test_rejects_redirected_task_paths_before_handoff_write(self):
+        for field in ("journal", "handoff", "receipt"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+                doc = st.read_state(fixture.state_path)
+                wrong = fixture.kit_root / "elsewhere" / f"{field}.md"
+                wrong.parent.mkdir()
+                wrong.write_text("do not change", encoding="utf-8")
+                if field == "journal":
+                    doc.task.journal = str(wrong.relative_to(fixture.kit_root))
+                else:
+                    setattr(doc.get_assignment(1), field, str(wrong.relative_to(fixture.kit_root)))
+                st.write_state(fixture.state_path, doc)
+                original = fixture.state_path.read_bytes()
+                canonical_handoff = fixture.task_dir / "01-node-backend-handoff.md"
+                original_handoff = canonical_handoff.read_bytes()
+                with self.assertRaisesRegex(Exception, "canonical task location"):
+                    preflight.run_preflight(
+                        fixture.state_path, 1, kit_root=fixture.kit_root,
+                        now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+                    )
+                self.assertEqual(fixture.state_path.read_bytes(), original)
+                self.assertEqual(canonical_handoff.read_bytes(), original_handoff)
+                self.assertEqual(wrong.read_text(encoding="utf-8"), "do not change")
+
+    def test_rejects_redirected_state_file_and_symlink_task_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            wrong = fixture.kit_root / "elsewhere" / "state.toml"
+            wrong.parent.mkdir()
+            wrong.write_bytes(fixture.state_path.read_bytes())
+            before = wrong.read_bytes()
+            with self.assertRaisesRegex(Exception, "canonical task location"):
+                preflight.run_preflight(
+                    wrong, 1, kit_root=fixture.kit_root,
+                    now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+                )
+            self.assertEqual(wrong.read_bytes(), before)
+
+            moved = fixture.kit_root / "escaped-task"
+            fixture.task_dir.rename(moved)
+            fixture.task_dir.symlink_to(moved, target_is_directory=True)
+            handoff = moved / "01-node-backend-handoff.md"
+            before_handoff = handoff.read_bytes()
+            with self.assertRaisesRegex(Exception, "symlink"):
+                preflight.run_preflight(
+                    fixture.state_path, 1, kit_root=fixture.kit_root,
+                    now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+                )
+            self.assertEqual(handoff.read_bytes(), before_handoff)
+
+    def test_rejects_symlinked_handoff_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            handoff = fixture.task_dir / "01-node-backend-handoff.md"
+            wrong = fixture.kit_root / "outside-handoff.md"
+            handoff.rename(wrong)
+            handoff.symlink_to(wrong)
+            before = wrong.read_bytes()
+            with self.assertRaisesRegex(Exception, "canonical task location"):
+                preflight.run_preflight(
+                    fixture.state_path, 1, kit_root=fixture.kit_root,
+                    now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+                )
+            self.assertEqual(wrong.read_bytes(), before)
+
+    def test_missing_roots_and_bullet_allowlist_are_synchronized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)", "Bash(git diff *)"])
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            original = handoff_path.read_text(encoding="utf-8")
+            changed = original.replace(
+                f"## Roots\n\n- **kit_root / target_root:** {fixture.kit_root}\n\n", ""
+            ).replace(
+                "- **Granted allowlist:** `Bash(git status --short)`, `Bash(git diff *)`",
+                "- **Granted allowlist:**\n  - `Bash(echo stale)`",
+            )
+            handoff_path.write_text(changed, encoding="utf-8")
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(result.ok, result.reasons)
+            self.assertIn("synchronized handoff fields: target_root, Granted allowlist", result.notes)
+            synchronized = handoff_path.read_text(encoding="utf-8")
+            self.assertIn(f"## Roots\n\n- **kit_root:** `{fixture.kit_root}`", synchronized)
+            self.assertIn(f"- **target_root:** `{fixture.kit_root}`", synchronized)
+            self.assertIn("- **Granted allowlist:** `Bash(git status --short)` `Bash(git diff *)`", synchronized)
+            self.assertNotIn("Bash(echo stale)", synchronized)
+            self.assertIn("Demo objective for preflight tests.", synchronized)
+            event = st.read_state(fixture.state_path).get_assignment(1).events[-1]
+            self.assertEqual(event.note, "synchronized: target_root, Granted allowlist")
+
+    def test_duplicate_allowlists_and_legacy_lists_collapse_without_other_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            source = handoff_path.read_text(encoding="utf-8")
+            label = "- **Granted allowlist:** `Bash(git status --short)`"
+            stale = (
+                "- **Granted allowlist:** `Bash(echo stale)`\n"
+                "  - `Bash(echo stale-list)`\n"
+                "  - Preserve this unrelated note.\n"
+                "- `example`\n"
+                "- **Granted allowlist:** `Bash(*)`\n"
+                "- `Bash(echo second-list)`\n"
+                "- **No commit:** Keep this exact metadata."
+            )
+            expected = source.replace(
+                label,
+                "- **Granted allowlist:** `Bash(git status --short)`\n"
+                "  - Preserve this unrelated note.\n"
+                "- `example`\n"
+                "- **No commit:** Keep this exact metadata.",
+            ) + "\n## Receipt\n\nKeep this exact section.\n"
+            handoff_path.write_text(
+                source.replace(label, stale) + "\n## Receipt\n\nKeep this exact section.\n",
+                encoding="utf-8",
+            )
+
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(result.ok, result.reasons)
+            self.assertEqual(result.notes, ["synchronized handoff fields: target_root, Granted allowlist"])
+            synchronized = handoff_path.read_text(encoding="utf-8")
+            self.assertEqual(synchronized, expected.replace(
+                f"- **kit_root / target_root:** {fixture.kit_root}",
+                f"- **kit_root:** {fixture.kit_root}\n- **target_root:** `{fixture.kit_root}`",
+            ))
+            self.assertEqual(synchronized.count("Granted allowlist:"), 1)
+            again, corrected = handoff_sync.synchronize(synchronized, fixture.assignment, fixture.kit_root)
+            self.assertEqual(again, synchronized)
+            self.assertEqual(corrected, [])
+
+    def test_multiple_targets_follow_state_order_and_preserve_other_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            second = fixture.kit_root / "second-target"
+            second.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=second, check=True)
+            fixture.assignment.targets = [str(second), str(fixture.kit_root)]
+            doc = st.read_state(fixture.state_path)
+            doc.get_assignment(1).targets = fixture.assignment.targets
+            st.write_state(fixture.state_path, doc)
+
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            source = handoff_path.read_text(encoding="utf-8")
+            source = source.replace("## Write scope", "Keep this exact sentence and spacing.\n\n## Write scope")
+            handoff_path.write_text(source, encoding="utf-8")
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(result.ok, result.reasons)
+            expected = source.replace(
+                f"- **kit_root / target_root:** {fixture.kit_root}",
+                f"- **kit_root:** {fixture.kit_root}\n"
+                f"- **target_root:** `{second}`\n- **target_root:** `{fixture.kit_root}`",
+            )
+            self.assertEqual(handoff_path.read_text(encoding="utf-8"), expected)
+
+    def test_missing_acceptance_fails_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            handoff_path.write_text(
+                handoff_path.read_text(encoding="utf-8").replace("1. Demo criterion.", ""),
+                encoding="utf-8",
+            )
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertFalse(result.ok)
+            self.assertTrue(any("acceptance criteria" in reason for reason in result.reasons))
+            self.assertEqual(st.read_state(fixture.state_path).get_assignment(1).state, "preparation_failed")
+
+    def test_identity_mismatches_fail_preparation(self):
+        replacements = {
+            "title": ("# demo-task — node-backend — 01 — implementação",
+                      "# other-task — node-backend — 01 — implementação"),
+            "role": ("- **Role:** node-backend", "- **Role:** reviewer"),
+            "profile": ("/.claude/agents/node-backend.md", "/.claude/agents/reviewer.md"),
+            "receipt": ("01-node-backend-receipt.md", "02-node-backend-receipt.md"),
+            "write scope": ("Assigned scope only.", ""),
+        }
+        for field, (old, new) in replacements.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+                handoff_path = fixture.kit_root / fixture.assignment.handoff
+                source = handoff_path.read_text(encoding="utf-8")
+                self.assertIn(old, source)
+                handoff_path.write_text(source.replace(old, new), encoding="utf-8")
+                result = preflight.run_preflight(
+                    fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                    which=_fake_which({"git"}), list_sessions=_no_sessions,
+                )
+                self.assertFalse(result.ok)
+                self.assertEqual(st.read_state(fixture.state_path).get_assignment(1).state, "preparation_failed")
+
+    def test_empty_allowlist_fails_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=[])
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
+                which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertFalse(result.ok)
+            self.assertTrue(any("allowlist" in reason for reason in result.reasons))
+
     def test_all_checks_pass_transitions_to_prepared(self):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])

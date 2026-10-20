@@ -12,3 +12,4 @@ Inspect only the affected Angular modules and their versions, routing, forms, st
 - Implement the affected validation, permission and visual states, including keyboard/focus and accessibility where interaction changes.
 - Consult only relevant items in [the feature checklist](templates/feature-checklist.md). It is a thinking aid, not a required artifact or a demand to add telemetry/E2E tests.
 - Test changed behavior with nearby conventions and run relevant discovered commands. Report checks skipped and why.
+- For an Angular view embedded in an iframe, inspect both parent and child before assigning ownership of theme, loading, authentication context, or ready state. Map `postMessage` sender/receiver, `origin`, `source`, `targetOrigin`, handshake and the difference between iframe `load` and application readiness; verify the relevant behavior visually when a browser is available.

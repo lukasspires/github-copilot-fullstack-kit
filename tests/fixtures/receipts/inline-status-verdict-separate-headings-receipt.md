@@ -5,11 +5,11 @@
 
 ## profile_read
 
-- `/mnt/dados/GitHub/github-copilot-fullstack-kit/.claude/agents/reviewer.md`
+- `__KIT_ROOT__/.claude/agents/reviewer.md`
 
 ## instructions_read
 
-- `/mnt/dados/GitHub/github-copilot-fullstack-kit/AGENTS.md`
+- `__KIT_ROOT__/AGENTS.md`
 
 ## changed
 

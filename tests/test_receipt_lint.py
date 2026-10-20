@@ -28,7 +28,29 @@ from pathlib import Path
 
 from scripts import receipt_lint
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipts"
+KIT_ROOT = Path(__file__).resolve().parent.parent
+SOURCE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipts"
+FIXTURES = SOURCE_FIXTURES
+_fixture_dir: tempfile.TemporaryDirectory | None = None
+
+
+def setUpModule() -> None:
+    """Materialize synthetic receipts with paths valid in this checkout."""
+    global FIXTURES, _fixture_dir
+    _fixture_dir = tempfile.TemporaryDirectory()
+    FIXTURES = Path(_fixture_dir.name)
+    for source in SOURCE_FIXTURES.glob("*.md"):
+        text = source.read_text(encoding="utf-8")
+        (FIXTURES / source.name).write_text(
+            text.replace("__KIT_ROOT__", str(KIT_ROOT)), encoding="utf-8"
+        )
+
+
+def tearDownModule() -> None:
+    global _fixture_dir
+    if _fixture_dir is not None:
+        _fixture_dir.cleanup()
+        _fixture_dir = None
 
 
 class ParseReceiptCombinedHeadingTests(unittest.TestCase):
@@ -39,7 +61,7 @@ class ParseReceiptCombinedHeadingTests(unittest.TestCase):
         data = receipt_lint.parse_receipt(text)
         self.assertEqual(data.status, "done")
         self.assertEqual(
-            data.profile_read, "/mnt/dados/GitHub/github-copilot-fullstack-kit/.claude/agents/reviewer.md"
+            data.profile_read, str(KIT_ROOT / ".claude" / "agents" / "reviewer.md")
         )
         self.assertEqual(len(data.instructions_read), 2)
         self.assertEqual(data.verdict, "PASS_WITH_RISKS")
@@ -53,7 +75,7 @@ class ParseReceiptCombinedHeadingTests(unittest.TestCase):
         text = (FIXTURES / "good-reviewer-receipt.md").read_text(encoding="utf-8")
         data = receipt_lint.parse_receipt(text)
         self.assertIn(
-            "/mnt/dados/GitHub/github-copilot-fullstack-kit/CLAUDE.md", data.instructions_read
+            str(KIT_ROOT / "CLAUDE.md"), data.instructions_read
         )
         for path in data.instructions_read:
             self.assertNotIn("(", path)
@@ -78,7 +100,7 @@ class ParseReceiptCombinedHeadingTests(unittest.TestCase):
         data = receipt_lint.parse_receipt(text)
         self.assertEqual(
             data.instructions_read,
-            ["/mnt/dados/GitHub/github-copilot-fullstack-kit/AGENTS.md"],
+            [str(KIT_ROOT / "AGENTS.md")],
         )
         errors, _ = receipt_lint.lint_receipt(text, role="reviewer")
         self.assertEqual(errors, [])
@@ -93,7 +115,7 @@ class ParseReceiptSeparateHeadingsTests(unittest.TestCase):
         self.assertEqual(data.status, "done")
         self.assertEqual(data.verdict, "PASS")
         self.assertEqual(
-            data.profile_read, "/mnt/dados/GitHub/github-copilot-fullstack-kit/.claude/agents/reviewer.md"
+            data.profile_read, str(KIT_ROOT / ".claude" / "agents" / "reviewer.md")
         )
         self.assertEqual(len(data.instructions_read), 2)
 

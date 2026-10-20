@@ -2,7 +2,7 @@
 
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `5abaed8`)
-- **Status:** Etapa 0 concluída em 2026-09-19 (schema v0 documentado como contrato em `docs/agent-workflow.md`, fixture versionada em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS` — tarefa `structured-state`, receipts `01`/`02`). Etapas 1–3 (scripts) não iniciadas; nenhum código existe ainda.
+- **Status histórico e atual:** Etapa 0 concluída em 2026-09-19 (schema v0 em `docs/agent-workflow.md`, fixture em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS`). Desde então, o kit passou a conter `scripts/state/`, `preflight`, `gate`, `launch_claude`, `status_claude`, `watch_claude`, `receipt_lint`, `state_lint` e testes. Este plano conserva o racional e o roteiro original; o estado de cada cenário de aceitação deve ser conferido nos scripts, testes e receipts atuais, sem inferir validação nativa completa da mera existência dos arquivos.
 - **Base:** [`analise-scripts-apoio-marina.md`](analise-scripts-apoio-marina.md) (seções 4, 9, 10 e 12)
 - **Escopo:** definir o estado estruturado de uma tarefa como estado de um grafo, planejar os grafos e loops do fluxo, e reordenar o roteiro da análise a partir desse modelo
 

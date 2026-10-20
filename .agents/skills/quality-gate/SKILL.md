@@ -8,6 +8,7 @@ description: Review changes for correctness, security, tests, compatibility, dat
 Use for an explicit review and automatically for changes to authorization, public contracts, data integrity, migrations or critical operations. This risk review is part of authorized local development; do not seek a second approval merely to review.
 
 - Inspect the diff and affected contracts, tests and target instructions. Reuse intake/evidence and consult only applicable items in [the review checklist](templates/review-checklist.md).
+- Check material implementation and test claims in the writer's receipt against the actual diff and available check output. Distinguish a defect introduced by this change, a verified preexisting defect, and a deviation explicitly accepted for this task; name the owner and scope of any remaining action.
 - Evaluate correctness, security, compatibility, integrity and operational consequences that the change actually affects. Do not demand unrelated infrastructure, tests or checklist artifacts.
 - With governance evidence, consult relevant company/Git guidance; report a normative failure only against a confirmed applicable source or project rule. Historical unverified summaries cannot independently justify failure, forced tags/statuses or a mandatory changelog.
 - Run relevant discovered non-mutating checks; do not repair files or operate live systems during review. Report unexecuted checks accurately.

@@ -2,12 +2,12 @@
 
 ## profile_read
 
-- `/mnt/dados/GitHub/github-copilot-fullstack-kit/.claude/agents/reviewer.md`
+- `__KIT_ROOT__/.claude/agents/reviewer.md`
 
 ## instructions_read
 
-- `/mnt/dados/GitHub/github-copilot-fullstack-kit/AGENTS.md`
-- `/mnt/dados/GitHub/github-copilot-fullstack-kit/CLAUDE.md`
+- `__KIT_ROOT__/AGENTS.md`
+- `__KIT_ROOT__/CLAUDE.md`
 
 ## status
 

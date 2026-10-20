@@ -10,8 +10,8 @@ Minimum tested Claude CLI version: 2.1.267 (optionally lists
 when the CLI is not installed — this check is best-effort because the
 kit-tooling development environment may not have it).
 
-Runtime write scope: only `--state`'s `state.toml` and, on success, a
-`git-before-<NN>.txt` file next to it (both inside
+Runtime write scope: the task's handoff metadata, `--state`'s `state.toml`
+and, on success, a `git-before-<NN>.txt` file next to it (all inside
 `.agent-state/<project>/tasks/<task>/`) — never `scripts/`, `tests/`, or a
 target repository. See tests/test_preflight.py::WriteScopeTest for a
 real-filesystem demonstration of this.
@@ -30,22 +30,9 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import common
+from scripts import common, handoff_sync
 from scripts.state import append_event, read_state, write_state
 from scripts.state.model import Assignment, StateDoc, StateError
-
-# Keyword markers a complete handoff must mention (case-insensitive
-# substring search); see docs/agent-workflow.md "Handoffs and continuity"
-# for the full field list this approximates structurally.
-REQUIRED_HANDOFF_MARKERS = (
-    "objective",
-    "profile",
-    "kit_root",
-    "write scope",
-    "acceptance",
-    "receipt",
-    "allowlist",
-)
 
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 _BASH_ENTRY_RE = re.compile(r"^Bash\((.*)\)$")
@@ -83,17 +70,6 @@ def _extract_check_commands(allowlist: list[str]) -> list[str]:
     return commands
 
 
-def _no_symlink_escape(task_dir: Path, kit_root: Path) -> bool:
-    if not task_dir.exists():
-        return True  # reported separately as "does not exist"
-    resolved = task_dir.resolve()
-    try:
-        resolved.relative_to(kit_root.resolve())
-    except ValueError:
-        return False
-    return True
-
-
 def run_preflight(
     state_path: str | Path,
     nn: int,
@@ -122,6 +98,9 @@ def run_preflight(
     if assignment.state != "reserved":
         raise StateError(f"nn={nn} is not in state 'reserved' (found {assignment.state!r}); preflight only runs once")
 
+    # This gate precedes every handoff read/write and every state write.
+    task_dir = handoff_sync.validate_task_paths(state_path, doc, assignment, kit_root)
+
     # slug/project format (docs/analise-scripts-apoio-marina.md §4.1).
     if not _SLUG_RE.match(doc.task.slug):
         reasons.append(f"task.slug {doc.task.slug!r} does not match ^[a-z0-9-]+$")
@@ -129,15 +108,15 @@ def run_preflight(
         reasons.append(f"task.project {doc.task.project!r} does not match ^[a-z0-9-]+$")
 
     # No symlink escaping .agent-state/<project>/tasks/<task>/.
-    task_dir = kit_root / Path(doc.task.journal).parent
     if not task_dir.exists():
         reasons.append(f"task directory does not exist: {task_dir}")
-    elif not _no_symlink_escape(task_dir, kit_root):
-        reasons.append(f"task directory escapes kit_root via symlink: {task_dir}")
 
-    # Handoff exists, non-empty, has the required sections.
+    # Handoff identity and human-authored content must be sound; launch
+    # metadata is mirrored from state before the node can be prepared.
     handoff_path = kit_root / assignment.handoff
     handoff_text = ""
+    profile_path_str = ""
+    sync_fields: list[str] = []
     if not handoff_path.is_file():
         reasons.append(f"handoff not found: {handoff_path}")
     else:
@@ -145,22 +124,22 @@ def run_preflight(
         if not handoff_text.strip():
             reasons.append(f"handoff is empty: {handoff_path}")
         else:
-            lowered = handoff_text.lower()
-            missing_markers = [m for m in REQUIRED_HANDOFF_MARKERS if m not in lowered]
-            if missing_markers:
-                reasons.append(f"handoff missing required section marker(s): {missing_markers}")
+            try:
+                handoff_sync.validate_location(handoff_path, task_dir)
+                profile_path_str = handoff_sync.validate_handoff(handoff_text, assignment, kit_root)
+                synchronized, sync_fields = handoff_sync.synchronize(handoff_text, assignment, kit_root)
+                if sync_fields:
+                    handoff_sync.write_atomic(handoff_path, synchronized, task_dir)
+                    handoff_text = synchronized
+                    notes.append(f"synchronized handoff fields: {', '.join(sync_fields)}")
+            except handoff_sync.HandoffError as exc:
+                reasons.append(str(exc))
 
     # Absolute profile referenced in the handoff exists and is readable.
-    if handoff_text:
-        profile_path_str = common.extract_profile_path(handoff_text)
-        if not profile_path_str:
-            reasons.append("could not find an absolute profile path referenced in the handoff")
-        else:
-            profile_path = Path(profile_path_str)
-            if not profile_path.is_absolute():
-                reasons.append(f"profile path in handoff is not absolute: {profile_path_str}")
-            elif not profile_path.is_file():
-                reasons.append(f"profile referenced in handoff not found or unreadable: {profile_path}")
+    if profile_path_str:
+        profile_path = Path(profile_path_str)
+        if not profile_path.is_file() or not _is_readable(profile_path):
+            reasons.append(f"profile referenced in handoff not found or unreadable: {profile_path}")
 
     # AGENTS.md / CLAUDE.md readable per target, when they exist.
     for target in assignment.targets:
@@ -207,7 +186,8 @@ def run_preflight(
         git_before_path = task_dir / f"git-before-{nn:02d}.txt"
         git_before_path.write_text("\n".join(git_before_parts) + "\n", encoding="utf-8")
         assignment.git_before = str(git_before_path.relative_to(kit_root))
-        append_event(assignment, "prepared", by="preflight", note="", at=now)
+        event_note = f"synchronized: {', '.join(sync_fields)}" if sync_fields else ""
+        append_event(assignment, "prepared", by="preflight", note=event_note, at=now)
     else:
         append_event(assignment, "preparation_failed", by="preflight", note=reasons[0], at=now)
 
@@ -233,7 +213,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kit-root", required=True)
     args = parser.parse_args(argv)
 
-    result = run_preflight(args.state, args.nn, kit_root=args.kit_root)
+    try:
+        result = run_preflight(args.state, args.nn, kit_root=args.kit_root)
+    except (StateError, handoff_sync.HandoffError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for note in result.notes:
         print(f"NOTE: {note}")
     if result.ok:

@@ -3,7 +3,7 @@
 
 Builds the exact `claude --bg ...` command described in
 docs/agent-workflow.md's "Claude Code" section from an already-`prepared`
-assignment's handoff, runs `preflight` first (fail-fast: aborts before
+assignment's state, runs `preflight` first (fail-fast: aborts before
 constructing or launching anything on `preparation_failed`), launches at
 most one session per invocation, and records the observed outcome via
 `scripts.state` (never hand-edits `state.toml` text).
@@ -24,10 +24,10 @@ boundary is always injectable (default `subprocess.run`, replaced with a
 fake in every test). Refuses to construct `bypassPermissions`,
 `--permission-prompts none`, `--resume`, `--continue`, `--fork-session`,
 or a bare/wildcard `--allowedTools` entry (`Bash`, `Bash(*)`) — see
-`LaunchRefused` and `FORBIDDEN_EXTRA_ARG_TOKENS`.
+`LaunchRefused` and the explicit safe flag allowlist.
 
-Runtime write scope: only `--state`'s `state.toml` (native.* + one event),
-inside `.agent-state/<project>/tasks/<task>/` — never `scripts/`, `tests/`,
+Runtime write scope: `--state`'s `state.toml` (native.* + one event) and
+the handoff metadata, inside `.agent-state/<project>/tasks/<task>/` — never `scripts/`, `tests/`,
 or a target repository.
 """
 
@@ -43,7 +43,7 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import common, preflight
+from scripts import common, handoff_sync, preflight
 from scripts.preflight import PreflightResult
 from scripts.state import append_event, read_state, write_state
 from scripts.state.model import StateError
@@ -61,7 +61,7 @@ FORBIDDEN_EXTRA_ARG_TOKENS: tuple[str, ...] = (
     "--continue",
     "--fork-session",
 )
-_BARE_ALLOWLIST_ENTRIES = frozenset({"Bash", "Bash(*)"})
+_BARE_ALLOWLIST_RE = re.compile(r"^Bash(?:\(\s*\*\s*\))?$", re.IGNORECASE)
 
 _SHORT_ID_RE = re.compile(r"\b[0-9a-f]{8}\b")
 
@@ -134,18 +134,29 @@ def parse_handoff(text: str) -> HandoffData:
 
 
 def _check_forbidden_allowlist(allowlist: list[str]) -> None:
+    if not allowlist:
+        raise LaunchRefused("refusing to construct an empty --allowedTools list")
     for entry in allowlist:
-        if entry.strip() in _BARE_ALLOWLIST_ENTRIES:
+        if _BARE_ALLOWLIST_RE.fullmatch(entry.strip()):
             raise LaunchRefused(
                 f"refusing to construct a bare/wildcard --allowedTools entry: {entry!r}"
             )
 
 
 def _check_forbidden_extra_args(extra_args: list[str]) -> None:
-    for arg in extra_args:
-        for token in FORBIDDEN_EXTRA_ARG_TOKENS:
-            if token in arg:
-                raise LaunchRefused(f"refusing to construct forbidden flag/behavior: {arg!r}")
+    """Only flags with no access or permission effect may be appended."""
+    seen: set[str] = set()
+    index = 0
+    while index < len(extra_args):
+        flag = extra_args[index]
+        if flag in seen or flag not in {"--verbose", "--model"}:
+            raise LaunchRefused(f"refusing extra flag/behavior: {flag!r}")
+        seen.add(flag)
+        if flag == "--model":
+            index += 1
+            if index >= len(extra_args) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", extra_args[index]):
+                raise LaunchRefused("--model requires a single model name")
+        index += 1
 
 
 def build_argv(
@@ -161,10 +172,8 @@ def build_argv(
     caller — those two are always the fixed, authorized values
     (`auto` / `{"worktree":{"bgIsolation":"none"}}`). `auto` is a distinct
     mode, NOT `bypassPermissions`; the ban on `bypassPermissions` and
-    `--permission-prompts` still applies unchanged. `extra_args`
-    exists only so a caller can pass through additional, ordinary
-    `claude` flags a future assignment might need, and is itself screened
-    against `FORBIDDEN_EXTRA_ARG_TOKENS` before being appended.
+    `--permission-prompts` still applies unchanged. `extra_args` accepts
+    only `--verbose` and a single `--model <name>` pair.
     """
 
     _check_forbidden_allowlist(handoff.allowlist)
@@ -212,6 +221,7 @@ class LaunchResult:
     reasons: list[str]
     session_id: str | None = None
     preflight_result: PreflightResult | None = None
+    notes: list[str] = dataclasses.field(default_factory=list)
 
 
 def run_launch(
@@ -235,6 +245,10 @@ def run_launch(
     kit_root = Path(kit_root)
     doc = read_state(state_path)
     assignment = doc.get_assignment(nn)
+    try:
+        handoff_sync.validate_task_paths(state_path, doc, assignment, kit_root)
+    except handoff_sync.HandoffError as exc:
+        return LaunchResult(ok=False, argv=None, reasons=[str(exc)])
 
     pre_result: PreflightResult | None = None
     if assignment.state == "reserved":
@@ -243,6 +257,10 @@ def run_launch(
             return LaunchResult(ok=False, argv=None, reasons=["preflight -> preparation_failed"] + pre_result.reasons, preflight_result=pre_result)
         doc = read_state(state_path)
         assignment = doc.get_assignment(nn)
+        try:
+            handoff_sync.validate_task_paths(state_path, doc, assignment, kit_root)
+        except handoff_sync.HandoffError as exc:
+            return LaunchResult(ok=False, argv=None, reasons=[str(exc)], preflight_result=pre_result)
 
     if assignment.state != "prepared":
         return LaunchResult(
@@ -252,27 +270,43 @@ def run_launch(
 
     handoff_path = kit_root / assignment.handoff
     handoff_text = read_text(handoff_path)
+    notes: list[str] = []
     try:
-        handoff_data = parse_handoff(handoff_text)
+        handoff_sync.validate_location(handoff_path, Path(state_path).parent)
+        profile = handoff_sync.validate_handoff(handoff_text, assignment, kit_root)
+        if profile != str(kit_root / ".claude" / "agents" / f"{assignment.role}.md"):
+            raise LaunchRefused("handoff does not name the Claude profile for this role")
+        synchronized, sync_fields = handoff_sync.synchronize(handoff_text, assignment, kit_root)
+        if sync_fields:
+            handoff_sync.write_atomic(handoff_path, synchronized, handoff_path.parent)
+            notes.append(f"synchronized handoff fields: {', '.join(sync_fields)}")
+        handoff_data = HandoffData(
+            task=doc.task.slug, role=assignment.role, nn=assignment.nn,
+            type_=assignment.type,
+            profile=profile,
+            targets=list(assignment.targets), allowlist=list(assignment.allowlist),
+        )
         argv = build_argv(handoff_data, handoff_path=str(handoff_path), extra_args=extra_args)
-    except LaunchRefused as exc:
-        return LaunchResult(ok=False, argv=None, reasons=[str(exc)], preflight_result=pre_result)
+    except (LaunchRefused, handoff_sync.HandoffError) as exc:
+        return LaunchResult(ok=False, argv=None, reasons=[str(exc)], preflight_result=pre_result, notes=notes)
 
     proc = run_subprocess(argv, capture_output=True, text=True, timeout=timeout, check=False)
     session_id = extract_short_id(proc.stdout) if proc.returncode == 0 else None
 
     if session_id:
-        append_event(assignment, "launched", by="launch-claude", note=f"id={session_id}")
+        sync_note = f"; synchronized: {', '.join(sync_fields)}" if sync_fields else ""
+        append_event(assignment, "launched", by="launch-claude", note=f"id={session_id}{sync_note}")
         assignment.native.platform = "claude"
         assignment.native.id = session_id
         write_state(state_path, doc)
-        return LaunchResult(ok=True, argv=argv, reasons=[], session_id=session_id, preflight_result=pre_result)
+        return LaunchResult(ok=True, argv=argv, reasons=[], session_id=session_id, preflight_result=pre_result, notes=notes)
 
     append_event(
         assignment,
         "uncertain",
         by="launch-claude",
-        note=f"command emitted; no id confirmed (exit={proc.returncode})",
+        note=f"command emitted; no id confirmed (exit={proc.returncode})" +
+             (f"; synchronized: {', '.join(sync_fields)}" if sync_fields else ""),
     )
     write_state(state_path, doc)
     return LaunchResult(
@@ -280,6 +314,7 @@ def run_launch(
         argv=argv,
         reasons=[f"no session id captured (exit={proc.returncode}); recorded as uncertain, not launched"],
         preflight_result=pre_result,
+        notes=notes,
     )
 
 
@@ -296,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    if result.preflight_result is not None:
+        for note in result.preflight_result.notes:
+            print(f"NOTE: {note}")
+    for note in result.notes:
+        print(f"NOTE: {note}")
     if result.argv is not None:
         print("argv:", " ".join(repr(a) for a in result.argv))
     if result.ok:

@@ -163,6 +163,16 @@ class ForbiddenConstructionTests(unittest.TestCase):
         argv = launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--model", "sonnet"])
         self.assertIn("--model", argv)
 
+    def test_controlled_or_duplicate_extra_flags_are_refused(self):
+        for extra in (
+            ["--allowedTools", "Bash(*)"], ["--add-dir", "/wrong"],
+            ["--permission-mode", "auto"], ["--settings", "{}"],
+            ["--model", "--allowedTools", "Bash(*)"],
+            ["--verbose", "--verbose"], ["--model", "sonnet", "--model", "opus"],
+        ):
+            with self.subTest(extra=extra), self.assertRaises(launch_claude.LaunchRefused):
+                launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=extra)
+
 
 class ExtractShortIdTests(unittest.TestCase):
     def test_extracts_real_shaped_id(self):
@@ -365,6 +375,129 @@ class RunLaunchTests(unittest.TestCase):
         self.assertNotIn("subprocess.run(", text)
         self.assertIn("run_subprocess(argv", text)
 
+    def test_launch_resynchronizes_handoff_changed_after_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            prepared = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root,
+                now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(prepared.ok, prepared.reasons)
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            original = handoff_path.read_text(encoding="utf-8")
+            changed = original.replace(
+                f"- **target_root:** `{fixture.kit_root}`", "- **target_root:** `/wrong`",
+            ).replace("- **Granted allowlist:** `Bash(git status --short)`",
+                      "- **Granted allowlist:**\n  - `Bash(echo wrong)`\n"
+                      "- **Granted allowlist:** `Bash(*)`\n  - `Bash(echo second wrong)`")
+            handoff_path.write_text(changed, encoding="utf-8")
+            recorder = _RecordingSubprocess("Started background session 182689df\n")
+
+            result = launch_claude.run_launch(
+                fixture.state_path, 1, kit_root=fixture.kit_root, run_subprocess=recorder,
+            )
+            self.assertTrue(result.ok, result.reasons)
+            self.assertEqual(len(recorder.calls), 1)
+            argv = recorder.calls[0]
+            self.assertEqual(argv[argv.index("--add-dir") + 1], str(fixture.kit_root))
+            self.assertEqual(argv[argv.index("--allowedTools") + 1], "Bash(git status --short)")
+            self.assertNotIn("/wrong", argv)
+            self.assertNotIn("Bash(echo wrong)", argv)
+            self.assertNotIn("Bash(*)", argv)
+            self.assertEqual(result.notes, ["synchronized handoff fields: target_root, Granted allowlist"])
+            self.assertIn("synchronized: target_root, Granted allowlist",
+                          st.read_state(fixture.state_path).get_assignment(1).events[-1].note)
+            updated = handoff_path.read_text(encoding="utf-8")
+            self.assertIn("- **target_root:** `" + str(fixture.kit_root) + "`", updated)
+            self.assertNotIn("Bash(echo wrong)", updated)
+            self.assertNotIn("Bash(echo second wrong)", updated)
+            self.assertNotIn("Bash(*)", updated)
+            self.assertEqual(updated.count("Granted allowlist:"), 1)
+
+    def test_prepared_node_with_missing_objective_refuses_subprocess(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            preflight.run_preflight(fixture.state_path, 1, kit_root=fixture.kit_root,
+                                    now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions)
+            handoff_path = fixture.kit_root / fixture.assignment.handoff
+            text = handoff_path.read_text(encoding="utf-8")
+            handoff_path.write_text(text.replace("Demo objective for launch-claude tests.", ""), encoding="utf-8")
+            recorder = _RecordingSubprocess("182689df\n")
+            result = launch_claude.run_launch(fixture.state_path, 1, kit_root=fixture.kit_root,
+                                              run_subprocess=recorder)
+            self.assertFalse(result.ok)
+            self.assertEqual(recorder.calls, [])
+            self.assertEqual(st.read_state(fixture.state_path).get_assignment(1).state, "prepared")
+
+    def test_prepared_node_rejects_redirected_paths_before_handoff_read_or_launch(self):
+        for field in ("journal", "handoff", "receipt"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+                prepared = preflight.run_preflight(
+                    fixture.state_path, 1, kit_root=fixture.kit_root,
+                    now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+                )
+                self.assertTrue(prepared.ok, prepared.reasons)
+                doc = st.read_state(fixture.state_path)
+                wrong = fixture.kit_root / "elsewhere" / f"{field}.md"
+                wrong.parent.mkdir()
+                wrong.write_text("do not change", encoding="utf-8")
+                if field == "journal":
+                    doc.task.journal = str(wrong.relative_to(fixture.kit_root))
+                else:
+                    setattr(doc.get_assignment(1), field, str(wrong.relative_to(fixture.kit_root)))
+                st.write_state(fixture.state_path, doc)
+                recorder = _RecordingSubprocess("182689df\n")
+
+                def forbidden_read(_path):
+                    self.fail("handoff was read before the path gate")
+
+                result = launch_claude.run_launch(
+                    fixture.state_path, 1, kit_root=fixture.kit_root,
+                    read_text=forbidden_read, run_subprocess=recorder,
+                )
+                self.assertFalse(result.ok)
+                self.assertEqual(recorder.calls, [])
+                self.assertEqual(wrong.read_text(encoding="utf-8"), "do not change")
+
+    def test_prepared_node_rejects_symlink_escaped_task_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            prepared = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root,
+                now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(prepared.ok, prepared.reasons)
+            moved = fixture.kit_root / "escaped-task"
+            fixture.task_dir.rename(moved)
+            fixture.task_dir.symlink_to(moved, target_is_directory=True)
+            recorder = _RecordingSubprocess("182689df\n")
+            result = launch_claude.run_launch(
+                fixture.state_path, 1, kit_root=fixture.kit_root, run_subprocess=recorder,
+            )
+            self.assertFalse(result.ok)
+            self.assertEqual(recorder.calls, [])
+
+    def test_prepared_node_rejects_redirected_state_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            prepared = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root,
+                now=AT, which=_fake_which({"git"}), list_sessions=_no_sessions,
+            )
+            self.assertTrue(prepared.ok, prepared.reasons)
+            wrong = fixture.kit_root / "elsewhere" / "state.toml"
+            wrong.parent.mkdir()
+            wrong.write_bytes(fixture.state_path.read_bytes())
+            before = wrong.read_bytes()
+            recorder = _RecordingSubprocess("182689df\n")
+            result = launch_claude.run_launch(
+                wrong, 1, kit_root=fixture.kit_root, run_subprocess=recorder,
+            )
+            self.assertFalse(result.ok)
+            self.assertEqual(recorder.calls, [])
+            self.assertEqual(wrong.read_bytes(), before)
+
 
 class RunLaunchForbiddenPipelineTests(unittest.TestCase):
     """Acceptance criterion 6, at the full `run_launch` level: each of the
@@ -403,6 +536,15 @@ class RunLaunchForbiddenPipelineTests(unittest.TestCase):
 
     def test_pipeline_refuses_fork_session(self):
         self._run_with_extra_args(["--fork-session"])
+
+    def test_pipeline_refuses_controlled_and_duplicate_extra_flags(self):
+        for extra in (
+            ["--allowedTools", "Bash(*)"], ["--add-dir", "/wrong"],
+            ["--permission-mode", "auto"], ["--settings", "{}"],
+            ["--model", "--allowedTools", "Bash(*)"], ["--verbose", "--verbose"],
+        ):
+            with self.subTest(extra=extra):
+                self._run_with_extra_args(extra)
 
 
 if __name__ == "__main__":
