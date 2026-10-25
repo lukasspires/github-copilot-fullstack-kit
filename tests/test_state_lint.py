@@ -155,13 +155,6 @@ class NegativeInvariantTests(unittest.TestCase):
         self.assertTrue(results["native_metadata"])
         self.assertEqual(_other_checks_pass(results, "native_metadata"), [])
 
-    def test_6_codex_with_id_without_host(self):
-        self.doc.assignments[1].native.platform = "codex"
-        self.doc.assignments[1].native.id = "thread-123"
-        self.doc.assignments[1].native.host = ""
-        results = state_lint.lint_doc(self.doc)
-        self.assertTrue(results["native_metadata"])
-
     def test_7_mode_incoherent_with_role(self):
         self.doc.assignments[1].mode = "writer"  # role=reviewer implies reader
         results = state_lint.lint_doc(self.doc)

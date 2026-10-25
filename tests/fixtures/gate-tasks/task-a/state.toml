@@ -37,7 +37,6 @@ allowlist = []
 [assignments.native]
 platform = "claude"
 id = ""
-host = ""
 reason = ""
 last_seen = ""
 

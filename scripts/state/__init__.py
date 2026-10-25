@@ -197,7 +197,6 @@ def add_assignment(
     predecessor: int,
     targets: Iterable[str],
     platform: str = "claude",
-    host: str = "",
     reason: str = "",
     allowlist: Iterable[str] | None = None,
     note: str = "",
@@ -250,7 +249,7 @@ def add_assignment(
         receipt=receipt,
         git_before="",
         allowlist=list(allowlist or []),
-        native=NativeMeta(platform=platform, host=host, reason=reason),
+        native=NativeMeta(platform=platform, reason=reason),
         events=[Event(at=at, from_="", to="reserved", by=by, note=note)],
     )
     doc.assignments.append(assignment)

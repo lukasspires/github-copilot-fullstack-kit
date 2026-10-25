@@ -90,11 +90,7 @@ def validate_handoff(text: str, assignment: Assignment, kit_root: Path) -> str:
     profile_line = _line_value(role_section[2], "Absolute profile")
     profile_match = _FIELD_PATH.search(profile_line or "")
     profile = profile_match.group(1) if profile_match else ""
-    expected_profiles = {
-        str(kit_root / ".claude" / "agents" / f"{assignment.role}.md"),
-        str(kit_root / ".codex" / "agents" / f"{assignment.role}.toml"),
-    }
-    if profile not in expected_profiles:
+    if profile != str(kit_root / ".claude" / "agents" / f"{assignment.role}.md"):
         raise HandoffError("handoff absolute profile is missing or inconsistent with role")
 
     for heading in ("Objective", "Write scope", "Acceptance criteria"):

@@ -1,5 +1,7 @@
 # Plano: estado estruturado e grafos do fluxo da Marina
 
+> Contexto histórico: o kit era dual Codex/Claude até 2026-10; referências a `.codex/`, `.agents/` e `native.platform = "codex"` neste documento descrevem esse período.
+
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `5abaed8`)
 - **Status histórico e atual:** Etapa 0 concluída em 2026-09-19 (schema v0 em `docs/agent-workflow.md`, fixture em `tests/fixtures/visible-sessions/state.toml`, revisão independente `PASS`). Desde então, o kit passou a conter `scripts/state/`, `preflight`, `gate`, `launch_claude`, `status_claude`, `watch_claude`, `receipt_lint`, `state_lint` e testes. Este plano conserva o racional e o roteiro original; o estado de cada cenário de aceitação deve ser conferido nos scripts, testes e receipts atuais, sem inferir validação nativa completa da mera existência dos arquivos.

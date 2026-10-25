@@ -27,7 +27,7 @@ class StateError(ValueError):
 # Roles whose `mode` is "reader"; every other role is a "writer" (plan §2.4).
 READER_ROLES = frozenset({"reviewer", "architect", "analista-redmine"})
 
-NATIVE_PLATFORMS = frozenset({"claude", "codex", "unavailable"})
+NATIVE_PLATFORMS = frozenset({"claude", "unavailable"})
 ASSIGNMENT_TYPES = frozenset({"implementação", "revisão", "correção", "análise"})
 ASSIGNMENT_MODES = frozenset({"writer", "reader"})
 EDGES = frozenset({"inicia", "revisa", "revisa_direta", "analisa", "corrige", "continua", "substitui", "prossegue"})
@@ -117,7 +117,6 @@ class Event:
 class NativeMeta:
     platform: str
     id: str = ""
-    host: str = ""
     reason: str = ""
     last_seen: str = ""
     last_seen_at: Optional[datetime.datetime] = None
@@ -129,10 +128,13 @@ class NativeMeta:
         platform = d["platform"]
         if platform not in NATIVE_PLATFORMS:
             raise StateError(f"[assignments.native] unknown platform: {platform!r}")
+        # Pre-2026-10 files carry an empty `host` key from the Codex era; tolerate
+        # it when empty, refuse a real Codex hostId.
+        if d.get("host", ""):
+            raise StateError("[assignments.native] 'host' was Codex-only and is no longer supported")
         return NativeMeta(
             platform=platform,
             id=d.get("id", ""),
-            host=d.get("host", ""),
             reason=d.get("reason", ""),
             last_seen=d.get("last_seen", ""),
             last_seen_at=d.get("last_seen_at"),
@@ -142,7 +144,6 @@ class NativeMeta:
         out = {
             "platform": self.platform,
             "id": self.id,
-            "host": self.host,
             "reason": self.reason,
             "last_seen": self.last_seen,
         }

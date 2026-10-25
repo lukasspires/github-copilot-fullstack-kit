@@ -19,11 +19,11 @@
                            · · · · · ·  · · · · · ·
 ```
 
-# Kit de agentes multi-repositório para Codex e Claude Code
+# Kit de agentes multi-repositório para Claude Code
 
 Este repositório é um **kit de coordenação**, não uma aplicação. Ele fornece perfis de agentes, skills e instruções de domínio para que uma sessão principal (a coordenadora **Marina**) receba uma tarefa, identifique o trabalho restante, delegue a especialistas em sessões visíveis independentes e consolide a implementação e a verificação local nos repositórios da aplicação.
 
-> Este README é documentação para pessoas. Os runtimes não o carregam como instrução: Claude Code lê `CLAUDE.md` (que importa `AGENTS.md`), `.claude/agents/` e `.claude/skills/`; Codex lê `AGENTS.md`, `.codex/agents/` e `.agents/skills/`. Por isso ele pode ser escrito em português sem afetar o comportamento dos agentes.
+> Este README é documentação para pessoas. Os runtimes não o carregam como instrução: Claude Code lê `CLAUDE.md` (que importa `AGENTS.md`), `.claude/agents/` e `.claude/skills/`. Por isso ele pode ser escrito em português sem afetar o comportamento dos agentes.
 
 ## Sumário
 
@@ -32,7 +32,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 - [Início rápido](#início-rápido)
 - [Como uma tarefa é executada](#como-uma-tarefa-é-executada)
 - [Equipe de agentes](#equipe-de-agentes)
-- [Configurações nativas por plataforma](#configurações-nativas-por-plataforma)
+- [Configuração nativa](#configuração-nativa)
 - [Skills principais](#skills-principais)
 - [Entrega e autorizações](#entrega-e-autorizações)
 - [Eficiência e verificação](#eficiência-e-verificação)
@@ -60,7 +60,6 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 | Item | Observação |
 |---|---|
 | Claude Code CLI ≥ 2.1.267 | Verificado em 2026-09-11 com `--bg`, `--name`, `--agent`, `--add-dir`, `--permission-mode`, `--allowedTools`, `claude agents`, `claude attach`, `claude logs`. Confira `claude --help` em outras versões. |
-| Codex desktop | Projeto do kit cadastrado com ambiente `local`; tools `list_projects`, `create_thread`, `wait_threads`, `read_thread`, `list_threads`. |
 | Repositórios-alvo clonados localmente | Caminhos absolutos; o kit não os descobre sozinho. |
 | Ferramentas de build/teste dos alvos no `PATH` | Os checks descobertos precisam resolver no ambiente da sessão em background (ex.: `mvn`, `node`, `go`, `python`). |
 | Python ≥ 3.11 | Só para rodar as ferramentas do próprio kit em `scripts/` (`tomllib` é stdlib a partir dessa versão); não é exigido para delegar tarefas aos especialistas. |
@@ -75,17 +74,11 @@ Inicie **na raiz do kit** e adicione cada repositório-alvo com `--add-dir`. Sub
 claude --agent marina --add-dir /caminho/absoluto/api --add-dir /caminho/absoluto/bff
 ```
 
-### Codex
-
-```bash
-codex -C /caminho/absoluto/agent-kit --add-dir /caminho/absoluto/api --add-dir /caminho/absoluto/bff
-```
-
 ### Em um IDE
 
 Selecione o kit como raiz da sessão e conceda acesso às pastas dos outros projetos pelos controles do próprio runtime. Ter as pastas abertas no IDE **não** prova que o runtime carregou o kit ou que tem acesso a cada projeto. Ao iniciar, confirme que os perfis do kit foram descobertos e que cada alvo está acessível. Reinicie a sessão após alterar perfis se o runtime já os tiver em cache.
 
-Claude Code descobre `.claude/skills/` de diretórios adicionados, mas **não** carrega os agentes deles; por isso o kit deve permanecer como raiz da sessão, e as instruções de cada alvo (`AGENTS.md`/`CLAUDE.md`) são lidas explicitamente. Referências: [permissões de diretório do Claude](https://code.claude.com/docs/en/permissions#additional-directories-grant-file-access-not-configuration) e [recursos do Codex](https://learn.chatgpt.com/docs/features).
+Claude Code descobre `.claude/skills/` de diretórios adicionados, mas **não** carrega os agentes deles; por isso o kit deve permanecer como raiz da sessão, e as instruções de cada alvo (`AGENTS.md`/`CLAUDE.md`) são lidas explicitamente. Referências: [permissões de diretório do Claude](https://code.claude.com/docs/en/permissions#additional-directories-grant-file-access-not-configuration).
 
 ### Primeira tarefa
 
@@ -102,7 +95,7 @@ Preservar o contrato atual do endpoint /v1/pacientes. Critério: testes existent
 2. **Checkpoint** — Para toda tarefa com atribuições, Marina mantém `.agent-state/<projeto>/tasks/<tarefa>/checkpoint.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação. `<projeto>` é o slug do repositório-alvo ou, em tarefas com vários repositórios, do diretório de workspace que os agrupa; assim o estado de projetos diferentes nunca se mistura. Antes de redescobrir, Marina lê a memória estável em `.agent-state/<projeto>/project/` (repositórios, arquitetura, convenções, integrações), que só ela escreve. Anexos e PDFs da tarefa ficam em `tasks/<tarefa>/inputs/`.
 3. **Roteamento** — Uma correção simples vai para um único especialista. O `architect` entra para decisões de arquitetura, contratos compartilhados, migrations e backfills; o `reviewer` revisa automaticamente autorização, contratos públicos, integridade de dados, migrations e operações críticas.
 4. **Handoff** — Antes de cada atribuição, Marina escreve `.agent-state/<projeto>/tasks/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência (inclusive o que já está em `project/`), critérios, checks descobertos e allowlist.
-5. **Sessão visível** — Cada implementação, revisão, correção ou análise abre uma sessão nova com título `<tarefa> — <papel> — <NN> — <tipo>`. Claude: `claude --bg --agent <papel>` com permissões por atribuição. Codex: `create_thread` no ambiente `local` do projeto. Nunca reutilizar, retomar ou bifurcar sessões concluídas.
+5. **Sessão visível** — Cada implementação, revisão, correção ou análise abre uma sessão nova com título `<tarefa> — <papel> — <NN> — <tipo>`. Claude: `claude --bg --agent <papel>` com permissões por atribuição. Nunca reutilizar, retomar ou bifurcar sessões concluídas.
 6. **Receipt** — O especialista escreve `<NN>-<papel>-receipt.md` com `status`, `changed`, `checks`, `evidence`, `risks`, `next`, mais `profile_read` e `instructions_read` (caminhos absolutos realmente lidos). O `reviewer` acrescenta `verdict` (`PASS`, `PASS_WITH_RISKS`, `FAIL`). Qualquer papel pode listar `promote_to_project_knowledge` — fatos curtos e sanitizados que valem para o projeto, não só para a tarefa; Marina decide o que promover para `project/`, e nenhum especialista escreve lá.
 7. **Gate entre writers** — O próximo writer só é liberado com o receipt final do anterior, evidência do gerenciador nativo de que ele parou, e `git status/diff` do alvo conferido e registrado. Writers são sequenciais entre repositórios; leitores (`reviewer`, `architect`, analista-redmine) podem sobrepor-se a outros leitores, nunca a um writer no mesmo alvo.
 8. **Correção** — Achados voltam ao **mesmo papel** em uma **nova** sessão. Falha repetida sem evidência nova exige novo diagnóstico, não uma alegação arbitrária de conclusão.
@@ -134,20 +127,20 @@ Regras de roteamento que costumam gerar dúvida:
 - Várias tecnologias na mesma tarefa **não** exigem o `architect`; um contrato compartilhado ou uma migration, sim. Conte consequências, não linguagens.
 - Papéis read-only (`architect`, `reviewer`, analista-redmine) escrevem apenas o próprio receipt. Essa fronteira é de instrução, não de sandbox; as permissões do runtime continuam valendo.
 
-## Configurações nativas por plataforma
+## Configuração nativa
 
-| Camada | Codex | Claude Code |
-|---|---|---|
-| Entrada | `AGENTS.md` | `CLAUDE.md`, que importa `AGENTS.md` |
-| Perfis | `.codex/agents/*.toml` | `.claude/agents/*.md` |
-| Skills sob demanda | `.agents/skills/` | `.claude/skills/` |
-| Instruções de domínio (carga explícita) | `.codex/instructions/` | `.claude/instructions/` |
+| Camada | Claude Code |
+|---|---|
+| Entrada | `CLAUDE.md`, que importa `AGENTS.md` |
+| Perfis | `.claude/agents/*.md` |
+| Skills sob demanda | `.claude/skills/` |
+| Instruções de domínio (carga explícita) | `.claude/instructions/` |
 
-As cópias fornecem comportamento equivalente com metadados nativos de cada plataforma. **Toda mudança de comportamento compartilhado deve atualizar as duas cópias.** As instruções de domínio são escolhidas por responsabilidade do módulo, não por extensão: backend TypeScript não carrega instruções Angular, e Go ETL não carrega automaticamente as de Go API. Sessões independentes usam o modelo configurado pelo usuário; a criação no Codex não define modelo. Os perfis não desativam controles de permissão do runtime.
+As instruções de domínio são escolhidas por responsabilidade do módulo, não por extensão: backend TypeScript não carrega instruções Angular, e Go ETL não carrega automaticamente as de Go API. Sessões independentes usam o modelo configurado pelo usuário. Os perfis não desativam controles de permissão do runtime. Até 2026-10 o kit também mantinha cópias para Codex; elas foram removidas (ver `docs/plano-marina-executavel-e-exclusividade-claude-2026-10.md`).
 
 ## Skills principais
 
-Skills são procedimentos carregados sob demanda. No Claude Code, Marina e os especialistas carregam a skill relevante automaticamente; você também pode invocá-la por `/nome-da-skill`. No Codex, use `$nome-da-skill` no prompt. Carregue apenas o necessário: uma alteração só em conector não exige a skill de pipeline completo.
+Skills são procedimentos carregados sob demanda. No Claude Code, Marina e os especialistas carregam a skill relevante automaticamente; você também pode invocá-la por `/nome-da-skill`. Carregue apenas o necessário: uma alteração só em conector não exige a skill de pipeline completo.
 
 ### Coordenação e qualidade
 
@@ -308,7 +301,7 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 - Carregue só as instruções e skills relevantes; reutilize descobertas e extratos de PDF; roteie de forma estreita e revise por consequência.
 - Teste o comportamento alterado proporcionalmente com os comandos descobertos no projeto; reporte resultados exatos e checks pulados. Não adicione testes que apenas repetem mudanças de texto de baixo impacto.
 - Meça tokens reais apenas quando o runtime os expõe; menos agentes ou menos bytes não são um percentual de economia.
-- O kit tem um validador estrutural em `scripts/kit_lint.py` (Python 3 stdlib, ver [Ferramentas do kit](#ferramentas-do-kit-scripts)) que checa paridade `.codex`/`.claude`, identidade de skills, `git diff --check` e roda a suíte de testes — mas ele não substitui uma simulação realista de tarefa nem prova comportamento de runtime; reporte honestamente o que não foi exercitado. O racional completo e o roteiro de scripts ainda pendentes estão em [docs/analise-scripts-apoio-marina.md](docs/analise-scripts-apoio-marina.md) e [docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md).
+- O kit tem um validador estrutural em `scripts/kit_lint.py` (Python 3 stdlib, ver [Ferramentas do kit](#ferramentas-do-kit-scripts)) que checa os perfis em `.claude/agents`, a ausência de diretórios de outro runtime, `git diff --check` e roda a suíte de testes — mas ele não substitui uma simulação realista de tarefa nem prova comportamento de runtime; reporte honestamente o que não foi exercitado. O racional completo e o roteiro de scripts ainda pendentes estão em [docs/analise-scripts-apoio-marina.md](docs/analise-scripts-apoio-marina.md) e [docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md).
 
 ## Ferramentas do kit (`scripts/`)
 
@@ -316,7 +309,7 @@ Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem d
 
 | Comando | O que faz |
 |---|---|
-| `python3 scripts/kit_lint.py` | Paridade de perfis `.codex`↔`.claude`, identidade de skills, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture, e roda a suíte `unittest` |
+| `python3 scripts/kit_lint.py` | Perfis `.claude/agents`, ausência de `.codex/`/`.agents/`, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture, e roda a suíte `unittest` |
 | `python3 -m unittest discover -s tests` | Suíte de testes isolada (fixtures em `tests/fixtures/`, nunca o `.agent-state/` real) |
 | `python3 scripts/state_lint.py [caminho/state.toml]` | As 8 invariantes do schema v0 (seção 5 do plano); usa a fixture versionada se nenhum caminho for informado |
 | `python3 scripts/preflight.py` | Gate de preparação `reserved → prepared \| preparation_failed` (seção 4.1 da análise) |
@@ -333,5 +326,7 @@ Estes scripts formalizam checks mecânicos; roteamento, mérito de receipt e dec
 | [docs/agent-workflow.md](docs/agent-workflow.md) | Papéis, handoffs, procedimento de lançamento/monitoramento por plataforma, aceitação e cenários de avaliação |
 | [docs/analise-scripts-apoio-marina.md](docs/analise-scripts-apoio-marina.md) | Análise de scripts auxiliares para o fluxo da Marina: casos de uso, benefícios, riscos e roteiro |
 | [docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md) | Schema v0 do estado estruturado (`state.toml`), grafos G1/G2/G3, decisões confirmadas e roteiro por etapas — Etapas 0 e 1 implementadas em `scripts/` |
-| `.claude/skills/*/SKILL.md` e `.agents/skills/*/SKILL.md` | Texto completo de cada skill, com templates e referências |
-| `.claude/instructions/` e `.codex/instructions/` | Instruções de domínio por responsabilidade de módulo |
+| [docs/analise-marina-executavel-e-exclusividade-claude-2026-10.md](docs/analise-marina-executavel-e-exclusividade-claude-2026-10.md) | Análise de ganhos e perdas: Marina como executável e exclusividade Claude |
+| [docs/plano-marina-executavel-e-exclusividade-claude-2026-10.md](docs/plano-marina-executavel-e-exclusividade-claude-2026-10.md) | Design aprovado: remoção do Codex (F0) e executável da Marina com envelope pré-aprovado (F1–F6) |
+| `.claude/skills/*/SKILL.md` | Texto completo de cada skill, com templates e referências |
+| `.claude/instructions/` | Instruções de domínio por responsabilidade de módulo |

@@ -109,29 +109,7 @@ The fixture at `tests/fixtures/visible-sessions/state.toml` uses `revisa_direta`
 
 ### Native platform metadata
 
-`native.platform` is `claude`, `codex` or `unavailable`; the last requires a non-empty `reason` and is how the disclosed main-session fallback (above) is represented structurally rather than only in prose. `native.platform = "codex"` requires a non-empty `host` whenever `id` is set.
-
-## Codex desktop
-
-Before dispatch inspect the installed tool schemas and available projects. The current desktop exposes `mcp__codex_app__list_projects`, `mcp__codex_app__create_thread`, `mcp__codex_app__wait_threads`, `mcp__codex_app__read_thread` and `mcp__codex_app__list_threads` (checked 2026-09-11). Availability and invocation authorization are separate: obey the calling environment's restrictions on task creation; if it cannot create specialist sessions, use the disclosed fallback.
-
-Select the project whose path is kit_root, and explicitly request the saved local checkout even when it is a Git repository:
-
-```json
-{
-  "title": "redmine-1234 — java-backend — 01 — implementação",
-  "target": {
-    "type": "project",
-    "projectId": "<id returned by list_projects>",
-    "environment": { "type": "local" }
-  },
-  "prompt": "Act as java-backend. Read <absolute-profile> and <absolute-handoff>, then execute the assignment."
-}
-```
-
-`create_thread` has no `agent_type`; reading a profile conveys instructions, not automatic enforcement of that file's runtime metadata. The receipt must confirm the profile read. Omit `model` and `thinking` to use the user's configured defaults, without assuming inheritance from Marina. Project-local approval controls are unchanged.
-
-Record and present the returned threadId and hostId. If a pending response only has clientThreadId, do not pass it to tools requiring threadId; reconcile through the manager before retrying. Follow progress with `wait_threads` using targets, hostId and returned cursor as afterCursor; use bounded waits. Use `read_thread` for necessary details and `list_threads` to check other activity. A native completion plus receipt and Git verification releases the next writer; neither completion nor a receipt alone proves acceptance.
+`native.platform` is `claude` or `unavailable`; the last requires a non-empty `reason` and is how the disclosed main-session fallback (above) is represented structurally rather than only in prose.
 
 ## Claude Code
 
@@ -159,7 +137,7 @@ For `scripts/launch_claude.py`, the selected assignment in `state.toml` supplies
 
 Commands outside the allowlist that require approval remain pending. Marina reports the exact command and ID, and the user answers through `claude attach <id>`. Never use `bypassPermissions` or `--permission-prompts none`, and never answer a native approval on the user's behalf. Do not carry per-assignment tool approvals to the next invocation; task-level development authorization remains scoped and separate.
 
-Sources checked 2026-09-11: [Claude CLI reference](https://code.claude.com/docs/en/cli-reference), [agent view and JSON state](https://code.claude.com/docs/en/agent-view#list-sessions-as-json), [permissions](https://code.claude.com/docs/en/permissions), and [Codex features](https://learn.chatgpt.com/docs/features). Exact Codex tool names/arguments above come from the installed desktop schemas, not a claim that the public features page documents that API. Runtime availability checks do not prove the acceptance scenarios below.
+Sources checked 2026-09-11: [Claude CLI reference](https://code.claude.com/docs/en/cli-reference), [agent view and JSON state](https://code.claude.com/docs/en/agent-view#list-sessions-as-json), [permissions](https://code.claude.com/docs/en/permissions). Runtime availability checks do not prove the acceptance scenarios below.
 
 ## Local acceptance
 
@@ -184,14 +162,14 @@ Use temporary, read-only simulations with supplied task artifacts and accessible
 | Missing/conflicting norm | Continue independent scope without invented compliance; identify the specific dependent decision. |
 | Multi-repository resume | Reuse decisions/authorization, recheck relevant Git state, preserve unrelated work. |
 | External project | Do not impose corporate skills, frameworks or identifiers. |
-| Native runtime | Confirm profile discovery and target access independently in Codex and Claude, without requiring the other platform's files. |
+| Native runtime | Confirm profile discovery and target access in Claude Code from the kit root. |
 
 Native discovery is distinct from static parsing. If only configuration files can be inspected, report parsing/path checks as such and leave actual runtime delegation/access and application behavior unverified.
 
 ## Visible-session acceptance scenarios
 
-Static checks cover TOML/YAML syntax, equivalent `.codex/` and `.claude/` instructions, native profile paths, no role delegation through Agent, and no conflicting fallback/blanket no-write rules. These do not replace real execution.
+Static checks cover profile frontmatter, the absence of other runtimes' directories, native profile paths, no role delegation through Agent, and no conflicting fallback/blanket no-write rules. These do not replace real execution.
 
-Before marking this workflow fully validated, execute in each platform an implementation → review → correction → new review chain with four distinct visible native IDs, four handoffs and four specialist-written receipts. Use a local disposable fixture and preserve a preexisting change. Check the manager, actual shared files, profile/instruction confirmations and recorded Git gates between writers. Marina consolidates the evidence; do not invent a defect just to obtain a correction.
+Before marking this workflow fully validated, execute in Claude Code an implementation → review → correction → new review chain with four distinct visible native IDs, four handoffs and four specialist-written receipts. Use a local disposable fixture and preserve a preexisting change. Check the manager, actual shared files, profile/instruction confirmations and recorded Git gates between writers. Marina consolidates the evidence; do not invent a defect just to obtain a correction.
 
 Also exercise an outside-allowlist command that visibly waits and is resolved by the human through attach without bypass; interrupted coordination resumed by checkpoint/manager without duplication; unavailable visible sessions with disclosed main-session fallback; clarification followed by a fresh assignment; and uncertain launch reconciliation without a duplicate writer. Record each as executed, failed, or pending with evidence. Simulated failure responses validate Marina's decision only and must not be labeled a real platform failure. Unavailable platforms, missing human interaction or unknown runtime state leave those acceptance criteria pending, not passed.
