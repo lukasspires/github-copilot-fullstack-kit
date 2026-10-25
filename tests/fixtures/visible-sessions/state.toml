@@ -42,7 +42,6 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
   [assignments.native]
   platform     = "claude"
   id           = "182689df"
-  host         = ""
   reason       = ""
   last_seen    = "stopped"
   last_seen_at = 2026-09-11T11:20:00-03:00
@@ -85,7 +84,6 @@ allowlist   = ["Bash(git diff *)", "Bash(git status --short)"]
   [assignments.native]
   platform     = "claude"
   id           = "c1897dee"
-  host         = ""
   reason       = ""
   last_seen    = "done"
   last_seen_at = 2026-09-11T14:00:00-03:00
@@ -189,7 +187,6 @@ allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --sh
   [assignments.native]
   platform     = "claude"
   id           = "70409944"
-  host         = ""
   reason       = ""
   last_seen    = "done"
   last_seen_at = 2026-09-11T17:00:00-03:00
@@ -269,6 +266,7 @@ allowlist   = ["Bash(git diff)", "Bash(git diff --check)", "Bash(git status --sh
   note = "PASS_WITH_RISKS aceito; riscos remanescentes (execução real de cadeia de 4 sessões) permanecem em aberto no checkpoint"
 
 # ---- nn=4 — análise, platform=unavailable (fallback Codex) ----------------
+# (histórico: o kit era dual Codex/Claude até 2026-10)
 # Real: ambiente Codex desktop proibiu create_thread para subtarefas; a coordenadora
 # assumiu a especialidade de validação Codex na sessão principal e divulgou o
 # fallback, conforme docs/agent-workflow.md ("delegação visível indisponível").
@@ -291,7 +289,6 @@ allowlist   = []
   [assignments.native]
   platform     = "unavailable"
   id           = ""
-  host         = ""
   reason       = "ambiente Codex desktop proíbe create_thread para subtarefas nesta sessão"
   last_seen    = ""
   last_seen_at = 2026-09-11T18:00:00-03:00
@@ -341,7 +338,6 @@ allowlist   = ["Bash(cd /mnt/dados/GitHub/github-copilot-fullstack-kit/.agent-st
   [assignments.native]
   platform     = "claude"
   id           = ""
-  host         = ""
   reason       = ""
   last_seen    = ""
   last_seen_at = 2026-09-13T10:10:00-03:00

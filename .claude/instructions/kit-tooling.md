@@ -1,6 +1,6 @@
 # Kit tooling instructions
 
-- Location: scripts live under `<kit_root>/scripts/` (platform-neutral; never inside `.claude/` or `.codex/`); bash only for trivial wrappers.
+- Location: scripts live under `<kit_root>/scripts/` (platform-neutral; never inside `.claude/`); bash only for trivial wrappers.
 - Python 3 stdlib only (`tomllib` requires ≥3.11); declare any optional dependency explicitly in the handoff, never assume it is installed.
 - Do not assume the user's shell is fish; every script needs an explicit shebang (`#!/usr/bin/env python3` or equivalent), never relying on shell-specific syntax.
 - No network access. Git usage is read-only (`status`, `diff`, `rev-parse`) — never `checkout`, `reset`, or `commit`.

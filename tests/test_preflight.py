@@ -339,6 +339,7 @@ class PositivePreflightTest(unittest.TestCase):
                       "# other-task — node-backend — 01 — implementação"),
             "role": ("- **Role:** node-backend", "- **Role:** reviewer"),
             "profile": ("/.claude/agents/node-backend.md", "/.claude/agents/reviewer.md"),
+            "codex profile": ("/.claude/agents/node-backend.md", "/.codex/agents/node-backend.toml"),
             "receipt": ("01-node-backend-receipt.md", "02-node-backend-receipt.md"),
             "write scope": ("Assigned scope only.", ""),
         }
@@ -349,12 +350,19 @@ class PositivePreflightTest(unittest.TestCase):
                 source = handoff_path.read_text(encoding="utf-8")
                 self.assertIn(old, source)
                 handoff_path.write_text(source.replace(old, new), encoding="utf-8")
+                if field == "codex profile":
+                    # The legacy profile file exists, so only the handoff's profile rule can reject it.
+                    codex_profile = fixture.kit_root / ".codex" / "agents" / "node-backend.toml"
+                    codex_profile.parent.mkdir(parents=True)
+                    codex_profile.write_text('name = "node-backend"\n', encoding="utf-8")
                 result = preflight.run_preflight(
                     fixture.state_path, 1, kit_root=fixture.kit_root, now=AT,
                     which=_fake_which({"git"}), list_sessions=_no_sessions,
                 )
                 self.assertFalse(result.ok)
                 self.assertEqual(st.read_state(fixture.state_path).get_assignment(1).state, "preparation_failed")
+                if field == "codex profile":
+                    self.assertTrue(any("absolute profile" in r for r in result.reasons), result.reasons)
 
     def test_empty_allowlist_fails_preparation(self):
         with tempfile.TemporaryDirectory() as tmp:

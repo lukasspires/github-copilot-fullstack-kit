@@ -1,5 +1,7 @@
 # Plano: estado e memória por projeto em `.agent-state/`
 
+> Contexto histórico: o kit era dual Codex/Claude até 2026-10; referências a `.codex/`, `.agents/` e `native.platform = "codex"` neste documento descrevem esse período.
+
 - **Data:** 2026-09-18
 - **Branch:** `feat/independent-visible-sessions` (HEAD `0b72cdf`)
 - **Status:** executado nesta branch (etapas 1–9 abaixo); sem commit

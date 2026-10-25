@@ -53,7 +53,6 @@ def cmd_add(args: argparse.Namespace) -> int:
         predecessor=args.predecessor,
         targets=args.target,
         platform=args.platform,
-        host=args.host,
         reason=args.reason,
         allowlist=args.allowlist,
         note=args.note,
@@ -103,8 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_p.add_argument("--edge", required=True)
     add_p.add_argument("--predecessor", required=True, type=int)
     add_p.add_argument("--target", action="append", required=True, help="repeat per target_root")
-    add_p.add_argument("--platform", default="claude", choices=("claude", "codex", "unavailable"))
-    add_p.add_argument("--host", default="", help="Codex hostId, when platform=codex")
+    add_p.add_argument("--platform", default="claude", choices=("claude", "unavailable"))
     add_p.add_argument("--reason", default="", help="required when platform=unavailable")
     add_p.add_argument("--allowlist", action="append", default=None, help="repeat per granted Bash(...) rule")
     add_p.add_argument("--note", default="")

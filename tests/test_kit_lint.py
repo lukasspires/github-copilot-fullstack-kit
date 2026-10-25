@@ -2,9 +2,8 @@
 
 Positive checks run against the real kit_root (read-only: parsing and
 byte-comparison only, no writes) to satisfy the handoff's acceptance
-criterion 6. The deliberate-break test (criterion 7) uses a disposable
-temp copy of a *minimal* two-file profile pair, never the real kit
-files. `check_unittests`/`check_git_diff` are tested with an injected
+criterion 6. Deliberate-break tests use a disposable temp directory,
+never the real kit files. `check_unittests`/`check_git_diff` are tested with an injected
 fake subprocess runner to avoid ever re-invoking the whole suite from
 within itself (which would recurse).
 """
@@ -14,6 +13,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from scripts import kit_lint
@@ -24,16 +24,12 @@ REAL_KIT_ROOT = Path(__file__).resolve().parent.parent
 class RealKitPositiveTests(unittest.TestCase):
     """These exercise the actual kit_root; read-only, no writes."""
 
-    def test_agent_profile_parity_passes_on_real_kit(self):
-        result = kit_lint.check_agent_profile_parity(REAL_KIT_ROOT)
+    def test_agent_profiles_pass_on_real_kit(self):
+        result = kit_lint.check_agent_profiles(REAL_KIT_ROOT)
         self.assertTrue(result.ok, result.details)
 
-    def test_instructions_parity_passes_on_real_kit(self):
-        result = kit_lint.check_instructions_parity(REAL_KIT_ROOT)
-        self.assertTrue(result.ok, result.details)
-
-    def test_skills_identity_passes_on_real_kit(self):
-        result = kit_lint.check_skills_identity(REAL_KIT_ROOT)
+    def test_no_foreign_runtime_passes_on_real_kit(self):
+        result = kit_lint.check_no_foreign_runtime(REAL_KIT_ROOT)
         self.assertTrue(result.ok, result.details)
 
     def test_git_diff_check_passes_on_real_kit(self):
@@ -48,95 +44,83 @@ class RealKitPositiveTests(unittest.TestCase):
         result = kit_lint.check_cli_versions(REAL_KIT_ROOT)
         self.assertTrue(result.ok, result.details)
 
+    def test_run_all_order(self):
+        # Patch the suite runner so run_all never re-invokes the test suite recursively.
+        fake = lambda kit_root, **_: kit_lint.CheckResult("unittest_suite", True, [])
+        with unittest.mock.patch.object(kit_lint, "check_unittests", fake):
+            results = kit_lint.run_all(REAL_KIT_ROOT)
+        self.assertEqual(
+            [r.name for r in results],
+            ["agent_profiles", "no_foreign_runtime", "git_diff_check", "cli_version_headers", "state_lint", "unittest_suite"],
+        )
 
-def _write_profile_pair(root: Path, role: str, *, md_body: str, toml_body: str) -> None:
+
+def _write_profile(root: Path, filename: str, text: str) -> None:
     (root / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / ".codex" / "agents").mkdir(parents=True, exist_ok=True)
-    (root / ".claude" / "agents" / f"{role}.md").write_text(
-        f'---\nname: {role}\ndescription: "Demo role."\n---\n\n{md_body}\n', encoding="utf-8"
-    )
-    (root / ".codex" / "agents" / f"{role}.toml").write_text(
-        'name = "%s"\ndescription = "Demo role."\ndeveloper_instructions = """\n%s\n"""\n' % (role, toml_body),
-        encoding="utf-8",
-    )
+    (root / ".claude" / "agents" / filename).write_text(text, encoding="utf-8")
 
 
-class DeliberateParityBreakTests(unittest.TestCase):
-    """Acceptance criterion 7: kit-lint fails loudly and specifically on a
-    deliberate parity break, in a disposable copy only."""
+class AgentProfilesTests(unittest.TestCase):
+    """Deliberate breaks in a disposable copy only, never the real kit files."""
 
-    def test_matching_pair_passes(self):
+    def test_valid_profile_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile_pair(root, "demo-role", md_body="Do the thing.", toml_body="Do the thing.")
-            result = kit_lint.check_agent_profile_parity(root)
+            _write_profile(Path(tmp), "demo.md", '---\nname: demo\ndescription: "Demo."\n---\n\nBody.\n')
+            result = kit_lint.check_agent_profiles(Path(tmp))
             self.assertTrue(result.ok, result.details)
 
-    def test_diverging_body_fails_specifically(self):
+    def test_no_profiles_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile_pair(
-                root, "demo-role", md_body="Do the thing.", toml_body="Do a DIFFERENT thing entirely."
-            )
-            result = kit_lint.check_agent_profile_parity(root)
+            result = kit_lint.check_agent_profiles(Path(tmp))
             self.assertFalse(result.ok)
-            self.assertTrue(any("demo-role" in d and "body differs" in d for d in result.details))
+            self.assertTrue(any("no *.md profiles" in d for d in result.details))
 
-    def test_missing_codex_counterpart_fails_specifically(self):
+    def test_name_differs_from_filename_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".claude" / "agents").mkdir(parents=True)
-            (root / ".codex" / "agents").mkdir(parents=True)
-            (root / ".claude" / "agents" / "orphan-role.md").write_text(
-                '---\nname: orphan-role\n---\nBody.\n', encoding="utf-8"
-            )
-            result = kit_lint.check_agent_profile_parity(root)
+            _write_profile(Path(tmp), "demo.md", '---\nname: other\ndescription: "Demo."\n---\n\nBody.\n')
+            result = kit_lint.check_agent_profiles(Path(tmp))
             self.assertFalse(result.ok)
-            self.assertTrue(any("orphan-role" in d and "missing Codex counterpart" in d for d in result.details))
+            self.assertTrue(any("demo" in d and "name" in d for d in result.details))
 
-    def test_normalization_ignores_native_path_and_backticks(self):
+    def test_missing_description_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_profile_pair(
-                root,
-                "demo-role",
-                md_body="Read `<kit_root>/.claude/instructions/demo-role.md`.",
-                toml_body="Read <kit_root>/.codex/instructions/demo-role.md.",
-            )
-            result = kit_lint.check_agent_profile_parity(root)
-            self.assertTrue(result.ok, result.details)
-
-
-class InstructionsAndSkillsBreakTests(unittest.TestCase):
-    def test_instructions_not_byte_identical_fails(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".claude" / "instructions").mkdir(parents=True)
-            (root / ".codex" / "instructions").mkdir(parents=True)
-            (root / ".claude" / "instructions" / "x.md").write_text("same\n", encoding="utf-8")
-            (root / ".codex" / "instructions" / "x.md").write_text("different\n", encoding="utf-8")
-            result = kit_lint.check_instructions_parity(root)
+            _write_profile(Path(tmp), "demo.md", "---\nname: demo\n---\n\nBody.\n")
+            result = kit_lint.check_agent_profiles(Path(tmp))
             self.assertFalse(result.ok)
+            self.assertTrue(any("description" in d for d in result.details))
 
-    def test_skills_missing_codex_counterpart_fails(self):
+    def test_empty_body_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".claude" / "skills" / "demo").mkdir(parents=True)
-            (root / ".agents" / "skills").mkdir(parents=True)
-            (root / ".claude" / "skills" / "demo" / "SKILL.md").write_text("body\n", encoding="utf-8")
-            result = kit_lint.check_skills_identity(root)
+            _write_profile(Path(tmp), "demo.md", '---\nname: demo\ndescription: "Demo."\n---\n\n')
+            result = kit_lint.check_agent_profiles(Path(tmp))
             self.assertFalse(result.ok)
+            self.assertTrue(any("body" in d for d in result.details))
 
-    def test_skills_openai_yaml_exception_does_not_fail(self):
+    def test_missing_frontmatter_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".claude" / "skills" / "demo").mkdir(parents=True)
-            (root / ".agents" / "skills" / "demo" / "agents").mkdir(parents=True)
-            (root / ".claude" / "skills" / "demo" / "SKILL.md").write_text("body\n", encoding="utf-8")
-            (root / ".agents" / "skills" / "demo" / "SKILL.md").write_text("body\n", encoding="utf-8")
-            (root / ".agents" / "skills" / "demo" / "agents" / "openai.yaml").write_text("x: 1\n", encoding="utf-8")
-            result = kit_lint.check_skills_identity(root)
-            self.assertTrue(result.ok, result.details)
+            _write_profile(Path(tmp), "demo.md", "Body only.\n")
+            self.assertFalse(kit_lint.check_agent_profiles(Path(tmp)).ok)
+
+
+class NoForeignRuntimeTests(unittest.TestCase):
+    def test_clean_root_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(kit_lint.check_no_foreign_runtime(Path(tmp)).ok)
+
+    def test_codex_dir_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".codex" / "agents").mkdir(parents=True)
+            result = kit_lint.check_no_foreign_runtime(Path(tmp))
+            self.assertFalse(result.ok)
+            self.assertTrue(any(".codex" in d for d in result.details))
+
+    def test_agents_dir_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".agents" / "skills" / "demo").mkdir(parents=True)
+            (Path(tmp) / ".agents" / "skills" / "demo" / "SKILL.md").write_text("x\n", encoding="utf-8")
+            result = kit_lint.check_no_foreign_runtime(Path(tmp))
+            self.assertFalse(result.ok)
+            self.assertTrue(any(".agents" in d for d in result.details))
 
 
 class InjectedRunnerTests(unittest.TestCase):

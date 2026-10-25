@@ -1,5 +1,7 @@
 # Análise: scripts auxiliares de apoio ao fluxo da Marina
 
+> Contexto histórico: o kit era dual Codex/Claude até 2026-10; referências a `.codex/`, `.agents/` e `native.platform = "codex"` neste documento descrevem esse período.
+
 - **Data:** 2026-09-16
 - **Branch analisada:** `feat/independent-visible-sessions` (HEAD `d18d37e`)
 - **Status:** proposta de avaliação; nenhum script foi implementado

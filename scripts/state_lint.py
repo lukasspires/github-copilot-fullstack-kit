@@ -171,15 +171,13 @@ def check_state_matches_events(doc: StateDoc) -> list[str]:
 
 
 def check_native_metadata(doc: StateDoc) -> list[str]:
-    """6. `platform=unavailable` requires `reason`; `platform=codex` with `id` requires `host`."""
+    """6. `platform=unavailable` requires `reason`."""
 
     errors: list[str] = []
     for a in doc.assignments:
         native = a.native
         if native.platform == "unavailable" and not native.reason.strip():
             errors.append(f"nn={a.nn}: native.platform=unavailable requires a non-empty reason")
-        if native.platform == "codex" and native.id and not native.host.strip():
-            errors.append(f"nn={a.nn}: native.platform=codex with id set requires a non-empty host")
     return errors
 
 

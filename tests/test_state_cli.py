@@ -371,5 +371,18 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(rc, 0)
 
 
+class AddArgsClaudeOnlyTests(unittest.TestCase):
+    BASE = ["add", "--state", "x.toml", "--role", "reviewer", "--type", "revisão",
+            "--edge", "inicia", "--predecessor", "0", "--target", "/tmp/x"]
+
+    def test_platform_codex_rejected_by_parser(self):
+        with self.assertRaises(SystemExit):
+            state_cli.main(self.BASE + ["--platform", "codex"])
+
+    def test_host_flag_removed(self):
+        with self.assertRaises(SystemExit):
+            state_cli.main(self.BASE + ["--host", "h"])
+
+
 if __name__ == "__main__":
     unittest.main()

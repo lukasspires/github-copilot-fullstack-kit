@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 import scripts.state as st
+from scripts.state import model
 from scripts.state.model import StateError, mode_for_role
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "visible-sessions" / "state.toml"
@@ -129,6 +130,26 @@ class StructuralValidationTests(unittest.TestCase):
         broken["assignments"][0]["events"] = []
         with self.assertRaises(StateError):
             st.StateDoc.from_raw(broken)
+
+
+class NativeMetaClaudeOnlyTests(unittest.TestCase):
+    def test_platforms(self):
+        self.assertEqual(model.NATIVE_PLATFORMS, frozenset({"claude", "unavailable"}))
+
+    def test_codex_platform_rejected(self):
+        with self.assertRaises(StateError) as ctx:
+            model.NativeMeta.from_dict({"platform": "codex", "id": "t-1"})
+        self.assertIn("codex", str(ctx.exception))
+
+    def test_legacy_empty_host_is_tolerated(self):
+        meta = model.NativeMeta.from_dict({"platform": "claude", "id": "abc", "host": ""})
+        self.assertEqual(meta.id, "abc")
+        self.assertNotIn("host", meta.to_dict())
+
+    def test_legacy_nonempty_host_rejected(self):
+        with self.assertRaises(StateError) as ctx:
+            model.NativeMeta.from_dict({"platform": "claude", "host": "h-1"})
+        self.assertIn("host", str(ctx.exception))
 
 
 if __name__ == "__main__":
