@@ -1,6 +1,6 @@
 # Plano: Marina executável e exclusividade Claude — 2026-10-25
 
-**Status:** design aprovado por seções em 2026-10-25; nada implementado. Base de análise: [analise-marina-executavel-e-exclusividade-claude-2026-10.md](analise-marina-executavel-e-exclusividade-claude-2026-10.md).
+**Status:** design aprovado por seções em 2026-10-25; F0 implementada (PR #7). Revisado após a F1 (2026-10-25): seções 3.3 e 3.5 ajustadas e decisão de permissão pendente — ver [achados-f1-spike-hooks-e-juiza-2026-10.md](achados-f1-spike-hooks-e-juiza-2026-10.md). Base de análise: [analise-marina-executavel-e-exclusividade-claude-2026-10.md](analise-marina-executavel-e-exclusividade-claude-2026-10.md).
 
 **Escopo.** Dois sub-projetos, executados em ordem:
 
@@ -154,7 +154,7 @@ Cada iteração de `marina run <projeto> <tarefa> --interval <s> --max-duration 
 
 **Gate de Git.** O runner grava `git-before-NN.txt` no launch e `git-after-NN.txt` ao observar `finished` de cada writer. Antes do próximo writer, reconhece o diff automaticamente só se o `git status`/`git diff` atual for idêntico ao `git-after` do writer anterior; qualquer diferença → `stop(foreign_change)`.
 
-**Contrato da juíza.** Perfil novo `.claude/agents/marina-judge.md`, tools só `Read`. Invocação: `claude -p --agent marina-judge --allowedTools Read --json-schema <schema>` com timeout. Entrada: tipo da pergunta, opções permitidas (sempre incluindo `stop`) e caminhos absolutos de receipts e handoffs relevantes. Saída: `{"decision": <opção>, "reason": <≤ 200 caracteres>}`. Timeout, JSON inválido, opção não oferecida ou cota `judge_max_calls` esgotada → `stop(judge_failed)`. A juíza não lança, não edita e não coordena; ela escolhe entre opções que `decide` já validou.
+**Contrato da juíza.** Perfil novo `.claude/agents/marina-judge.md`, **sem** lista `tools` no frontmatter: uma lista `tools` no agente faz o CLI ignorar `--json-schema` em silêncio (F1, H7). A restrição a leitura vem da invocação: `claude -p --agent marina-judge --tools Read --json-schema <schema> --output-format json --max-budget-usd <limite> --no-session-persistence`, com timeout e stdin fechado (F1, X1). A decisão é lida de `structured_output`; ausência dessa chave conta como JSON inválido. Sessões `-p` não aparecem em `claude agents --json --all`, então não interferem no `gate`/`preflight` (F1, H9). Entrada: tipo da pergunta, opções permitidas (sempre incluindo `stop`) e caminhos absolutos de receipts e handoffs relevantes. Saída: `{"decision": <opção>, "reason": <≤ 200 caracteres>}`. Timeout, JSON inválido, opção não oferecida, orçamento estourado ou cota `judge_max_calls` esgotada → `stop(judge_failed)`. A juíza não lança, não edita e não coordena; ela escolhe entre opções que `decide` já validou.
 
 **Encerramento.** Em `done` ou `stop`, o runner acrescenta ao `checkpoint.md` uma seção gerada "Execução marina-run <timestamp>" com nós criados, decisões da juíza, motivo de parada e próxima ação/dono; depois solta a trava.
 
@@ -179,10 +179,14 @@ Não existe ferramenta de aprovação. O perfil `marina.md` recebe as ferramenta
 
 `launch_claude` acrescenta `hooks` ao JSON de `--settings` que já carrega `worktree.bgIsolation = "none"`:
 
-- **PreToolUse** com matcher `Write|Edit|NotebookEdit` → `marina hook guard-write --role <papel> --receipt <caminho> --target <alvo>...`. Papéis leitores: permite só o receipt. Writers: permite caminhos dentro dos `targets` e o receipt. Qualquer outro caminho → bloqueio com mensagem.
-- **Stop** → `marina hook require-receipt --receipt <caminho> --handoff <caminho>`. Receipt ausente ou reprovado no `receipt_lint` → bloqueia o encerramento e devolve o erro ao modelo. Se a entrada do hook indicar que ele já está ativo, libera; o runner registra `receipt_missing`/`receipt_invalid` normalmente.
+- **PreToolUse** com matcher `Write|Edit|NotebookEdit` → `marina hook guard-write --role <papel> --receipt <caminho> --target <alvo>...`. Papéis leitores: permite só o receipt. Writers: permite caminhos dentro dos `targets` e o receipt. Qualquer outro caminho → bloqueio com mensagem (exit 2). O caminho comparado é o absoluto de `tool_input.file_path` (ou `notebook_path`), nunca relativo a `CLAUDE_PROJECT_DIR`, que em produção é a raiz do kit (F1, H6). O bloqueio não aparece em `permission_denials`; a evidência é o próprio hook (F1, H2).
+- **Stop** → `marina hook require-receipt --receipt <caminho> --handoff <caminho>`. Receipt ausente ou reprovado no `receipt_lint` → bloqueia o encerramento e devolve o erro ao modelo. Se a entrada do hook trouxer `stop_hook_active: true`, libera (F1, H4); o runner registra `receipt_missing`/`receipt_invalid` normalmente.
 
 **Limite declarado.** Escrita por Bash (`sed -i`, redirecionamento) não é coberta pelo PreToolUse de `Write|Edit`; continua sendo fronteira de instrução e de allowlist. Docs e o perfil do reviewer dizem isso explicitamente.
+
+**Stdin fechado.** `launch_claude` e todo subprocesso `claude` aberto pelo pacote passam `stdin=subprocess.DEVNULL`: um `claude` filho trata o stdin herdado como entrada e age sobre ele (F1, X1).
+
+**Modo de permissão — decidido em 2026-10-25: `dontAsk`.** Em `--permission-mode auto`, o classificador pode aprovar comandos fora de `--allowedTools` sem prompt nem registro (F1, X2). Especialistas em background passam a usar `dontAsk`: a allowlist é a fronteira, e comandos fora dela são negados (registrados em `permission_denials`) e reportados pelo especialista no receipt, em vez de esperar `claude attach`. A allowlist de cada launch é a soma de: regras `Bash(...)` derivadas dos checks (registradas no `state.toml`) e regras de escrita derivadas da atribuição — `Edit(//<alvo>/**)` por alvo para writers e `Edit(//<receipt>)` para todo papel (F1, adendo: `Edit(...)` com caminho cobre o `Write`; `Write(...)` com caminho não vale). Com essas regras nativas, o hook `guard-write` desta seção fica redundante para `Write`/`Edit`; a F2 o substitui por elas e mantém só o Stop hook. `status_claude` passa a classificar `state: blocked` + `status: idle` + sem `waitingFor` como fim de turno. `AGENTS.md`, `CLAUDE.md`, a skill `task-execution`, `docs/agent-workflow.md`, o README e `launch_claude` são alinhados na F2.
 
 ### 3.6 Falhas e retomada
 
@@ -210,8 +214,8 @@ Cada fase é uma atribuição própria ao `kit-tooling` (código em `scripts/`/`
 | Fase | Entrega | Pré-condição |
 |---|---|---|
 | F0 | Sub-projeto 1 completo (seção 2) | — |
-| F1 | Spike só de leitura no CLI instalado (2.1.306): formato de `hooks` via `--settings`; se soma às configurações do usuário; campo de Stop hook ativo; `claude -p --agent --json-schema --allowedTools` | F0 |
-| F2 | `hooks.py` e integração em `launch_claude` (seção 3.5) | F1 confirma o formato; divergência devolve 3.5 para redesenho |
+| F1 | Spike só de leitura no CLI instalado (2.1.306): formato de `hooks` via `--settings`; se soma às configurações do usuário; campo de Stop hook ativo; `claude -p --agent --json-schema --tools`. **Executada em 2026-10-25** — ver achados | F0 |
+| F2 | `dontAsk` com regras de escrita derivadas, Stop hook `require-receipt`, `stdin=DEVNULL` e classificação de `blocked` em `launch_claude`/`status_claude`; alinhamento de `AGENTS.md`, `CLAUDE.md`, skill, `agent-workflow.md` e README (seção 3.5) | F1 e decisão de permissão (2026-10-25) |
 | F3 | `envelope.py`, schema v1, `marina approve`, `decide.py`, faixa cinzenta no `gate` | F0 |
 | F4 | `handoff_gen.py`, `judge.py` com perfil `marina-judge`, `runner.py`, `marina run/status/stop`; **no mesmo bloco**, a reescrita da regra em `AGENTS.md` e `docs/agent-workflow.md`: "opening the next node is never automatic outside a human-approved envelope (`marina approve`)", e a exceção da juíza à regra "never delegate to another coordinator" (juíza só leitura, decide entre opções dadas) | F1, F3 |
 | F5 | `mcp_server.py`, `.mcp.json`, `tools` do perfil `marina.md`, ajuste da skill `task-execution` | F4 |
