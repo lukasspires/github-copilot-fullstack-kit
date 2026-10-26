@@ -67,6 +67,17 @@ class ClassifySessionTests(unittest.TestCase):
     def test_finished_done(self):
         self.assertEqual(status_claude.classify_session(_session(state="done")), "finished")
 
+    def test_blocked_idle_without_waiting_for_is_finished(self):
+        # dontAsk background sessions end their turn in this state after denials (F1, Q2).
+        session = _session(state="blocked", status="idle", waitingFor=None)
+        self.assertEqual(status_claude.classify_session(session), "finished")
+
+    def test_blocked_idle_missing_waiting_for_key_is_finished(self):
+        self.assertEqual(status_claude.classify_session(_session(state="blocked", status="idle")), "finished")
+
+    def test_blocked_busy_stays_unknown(self):
+        self.assertEqual(status_claude.classify_session(_session(state="blocked", status="busy")), "unknown")
+
     def test_finished_stopped(self):
         self.assertEqual(status_claude.classify_session(_session(state="stopped")), "finished")
 

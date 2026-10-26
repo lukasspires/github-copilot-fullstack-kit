@@ -8,9 +8,11 @@ real installed CLI.
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts import common
 
@@ -192,6 +194,30 @@ class CliVersionHeaderTests(unittest.TestCase):
     def test_parse_version(self):
         self.assertEqual(common.parse_version("2.1.267 (Claude Code)"), (2, 1, 267))
         self.assertIsNone(common.parse_version("no version here"))
+
+
+class ClaudeSubprocessStdinTests(unittest.TestCase):
+    """A child `claude` reads inherited stdin and acts on it (F1, X1), so
+    every call the kit makes closes it."""
+
+    def _patched(self, stdout: str):
+        completed = subprocess.CompletedProcess(["claude"], 0, stdout=stdout, stderr="")
+        return (
+            mock.patch.object(common.shutil, "which", return_value="/usr/bin/claude"),
+            mock.patch.object(common.subprocess, "run", return_value=completed),
+        )
+
+    def test_list_manager_sessions_closes_stdin(self):
+        which, run = self._patched("[]")
+        with which, run as fake_run:
+            self.assertEqual(common.list_manager_sessions(), [])
+        self.assertIs(fake_run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_installed_claude_version_closes_stdin(self):
+        which, run = self._patched("2.1.306 (Claude Code)")
+        with which, run as fake_run:
+            self.assertEqual(common.installed_claude_version(), "2.1.306 (Claude Code)")
+        self.assertIs(fake_run.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

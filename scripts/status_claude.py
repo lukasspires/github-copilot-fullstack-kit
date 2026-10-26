@@ -4,8 +4,9 @@
 transition, never answers a prompt: when `waitingFor: permission prompt`,
 prints the literal instruction `claude attach <id>` and stops.
 
-Minimum tested Claude CLI version: 2.1.270 — `cwd` confirmed present on
-every listed session (background and interactive) on this version; see
+Minimum tested Claude CLI version: 2.1.306 — `cwd` confirmed present on
+every listed session (background and interactive), and the dontAsk
+end-of-turn `blocked`/`idle` state observed, on this version; see
 docs/agent-workflow.md's "Claude Code" section. Filters by `cwd` and/or
 title prefix, per the handoff (not title prefix alone).
 
@@ -111,6 +112,10 @@ def classify_session(session: dict) -> str:
     if session.get("status") == "waiting" and session.get("waitingFor") == "permission prompt":
         return "waiting_approval"
     state = session.get("state")
+    # dontAsk background sessions end their turn as blocked/idle with no
+    # waitingFor after denials (docs/achados-f1-spike-hooks-e-juiza-2026-10.md, Q2).
+    if state == "blocked" and session.get("status") == "idle" and not session.get("waitingFor"):
+        return "finished"
     if state == "working":
         return "working"
     if state in FINISHED_STATES:
