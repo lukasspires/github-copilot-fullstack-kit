@@ -225,6 +225,7 @@ def list_manager_sessions(*, cli: str = "claude", timeout: int = 10) -> list[dic
             text=True,
             timeout=timeout,
             check=False,
+            stdin=subprocess.DEVNULL,
         )
     except OSError as exc:  # pragma: no cover - defensive
         raise ManagerUnavailable(str(exc)) from exc
@@ -274,7 +275,8 @@ def installed_claude_version(*, cli: str = "claude", timeout: int = 10) -> str |
         return None
     try:
         proc = subprocess.run(
-            [exe, "--version"], capture_output=True, text=True, timeout=timeout, check=False
+            [exe, "--version"], capture_output=True, text=True, timeout=timeout, check=False,
+            stdin=subprocess.DEVNULL,
         )
     except OSError:  # pragma: no cover - defensive
         return None

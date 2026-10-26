@@ -59,7 +59,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 
 | Item | Observação |
 |---|---|
-| Claude Code CLI ≥ 2.1.267 | Verificado em 2026-09-11 com `--bg`, `--name`, `--agent`, `--add-dir`, `--permission-mode`, `--allowedTools`, `claude agents`, `claude attach`, `claude logs`. Confira `claude --help` em outras versões. |
+| Claude Code CLI ≥ 2.1.306 | Verificado em 2026-10-25 com `--bg`, `--name`, `--agent`, `--add-dir`, `--settings` com hooks, `--permission-mode`, `--allowedTools`, `claude agents`, `claude attach`, `claude logs`. Confira `claude --help` em outras versões. |
 | Repositórios-alvo clonados localmente | Caminhos absolutos; o kit não os descobre sozinho. |
 | Ferramentas de build/teste dos alvos no `PATH` | Os checks descobertos precisam resolver no ambiente da sessão em background (ex.: `mvn`, `node`, `go`, `python`). |
 | Python ≥ 3.11 | Só para rodar as ferramentas do próprio kit em `scripts/` (`tomllib` é stdlib a partir dessa versão); não é exigido para delegar tarefas aos especialistas. |

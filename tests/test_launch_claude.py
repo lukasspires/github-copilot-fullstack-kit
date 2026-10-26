@@ -11,6 +11,8 @@ code, not stubs.
 from __future__ import annotations
 
 import datetime
+import json
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -58,19 +60,15 @@ Demo objective matching docs/agent-workflow.md's Claude Code example.
 """
 
 EXPECTED_DOC_ARGV = [
-    "claude",
-    "--bg",
-    "--agent",
-    "java-backend",
-    "--name",
-    "redmine-1234 — java-backend — 01 — implementação",
-    "--add-dir",
-    "/absolute/api",
+    "claude", "--bg", "--agent", "java-backend",
+    "--name", "redmine-1234 — java-backend — 01 — implementação",
+    "--add-dir", "/absolute/api",
     "--settings",
-    '{"worktree":{"bgIsolation":"none"}}',
-    "--permission-mode",
-    "auto",
+    '{"worktree":{"bgIsolation":"none"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"python3 /absolute/kit/scripts/marina/__main__.py hook require-receipt --receipt /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md --handoff /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md"}]}]}}',
+    "--permission-mode", "dontAsk",
     "--allowedTools",
+    "Edit(//absolute/api/**)",
+    "Edit(//absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md)",
     "Bash(mvn test)",
     "--",
     "Act as java-backend. Read /absolute/kit/.claude/agents/java-backend.md and "
@@ -101,7 +99,10 @@ class BuildArgvDocumentedExampleTest(unittest.TestCase):
     def test_argv_matches_field_for_field(self):
         data = launch_claude.parse_handoff(REDMINE_HANDOFF_TEXT)
         argv = launch_claude.build_argv(
-            data, handoff_path="/absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md"
+            data,
+            handoff_path="/absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md",
+            receipt_path="/absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md",
+            kit_root=Path("/absolute/kit"),
         )
         self.assertEqual(argv, EXPECTED_DOC_ARGV)
 
@@ -118,49 +119,61 @@ class ForbiddenConstructionTests(unittest.TestCase):
         return data
 
     def test_default_argv_never_emits_bypass_or_permission_prompts(self):
-        """Regression: switching the fixed mode to `auto` must not loosen
-        the ban. No emitted token may contain `bypassPermissions` or
-        `--permission-prompts`, and the mode value is exactly `auto`."""
-        argv = launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--verbose"])
+        """Regression: the fixed mode `dontAsk` must not loosen the ban.
+        No emitted token may contain `bypassPermissions` or
+        `--permission-prompts`, and the mode value is exactly `dontAsk`."""
+        argv = launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--verbose"])
         for token in argv:
             self.assertNotIn("bypassPermissions", token)
             self.assertNotIn("--permission-prompts", token)
         self.assertEqual(argv.count("--permission-mode"), 1)
-        self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
         self.assertIn("bypassPermissions", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
         self.assertIn("--permission-prompts", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
-        self.assertNotIn("auto", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
+        self.assertNotIn("dontAsk", launch_claude.FORBIDDEN_EXTRA_ARG_TOKENS)
 
     def test_refuses_bypass_permissions(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--permission-mode", "bypassPermissions"])
+            launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--permission-mode", "bypassPermissions"])
 
     def test_refuses_permission_prompts_none(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--permission-prompts", "none"])
+            launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--permission-prompts", "none"])
 
     def test_refuses_resume(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--resume", "some-id"])
+            launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--resume", "some-id"])
 
     def test_refuses_continue(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--continue"])
+            launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--continue"])
 
     def test_refuses_fork_session(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--fork-session"])
+            launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--fork-session"])
 
     def test_refuses_bare_bash_allowlist_entry(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(allowlist=["Bash"]), handoff_path="/x")
+            launch_claude.build_argv(self._data(allowlist=["Bash"]), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"))
 
     def test_refuses_wildcard_bash_allowlist_entry(self):
         with self.assertRaises(launch_claude.LaunchRefused):
-            launch_claude.build_argv(self._data(allowlist=["Bash(*)"]), handoff_path="/x")
+            launch_claude.build_argv(self._data(allowlist=["Bash(*)"]), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"))
+
+    def test_refuses_file_write_rules_in_allowlist(self):
+        for entry in ("Edit", "Edit(//abs/**)", "edit(src/**)", "Write", "NotebookEdit", "MultiEdit"):
+            with self.subTest(entry=entry):
+                data = self._data(allowlist=["Bash(mvn test)", entry])
+                with self.assertRaises(launch_claude.LaunchRefused):
+                    launch_claude.build_argv(data, handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"))
+
+    def test_permission_mode_is_dont_ask(self):
+        argv = launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"))
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        self.assertNotIn("auto", argv)
 
     def test_ordinary_extra_args_are_not_refused(self):
-        argv = launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=["--model", "sonnet"])
+        argv = launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=["--model", "sonnet"])
         self.assertIn("--model", argv)
 
     def test_controlled_or_duplicate_extra_flags_are_refused(self):
@@ -171,7 +184,51 @@ class ForbiddenConstructionTests(unittest.TestCase):
             ["--verbose", "--verbose"], ["--model", "sonnet", "--model", "opus"],
         ):
             with self.subTest(extra=extra), self.assertRaises(launch_claude.LaunchRefused):
-                launch_claude.build_argv(self._data(), handoff_path="/x", extra_args=extra)
+                launch_claude.build_argv(self._data(), handoff_path="/x", receipt_path="/kit/r.md", kit_root=Path("/kit"), extra_args=extra)
+
+
+class WriteRulesAndSettingsTests(unittest.TestCase):
+    def test_writer_rules_cover_each_target_then_receipt(self):
+        self.assertEqual(
+            launch_claude.derive_write_rules("writer", ["/abs/api", "/abs/bff"], "/kit/.agent-state/p/tasks/t/01-x-receipt.md"),
+            ["Edit(//abs/api/**)", "Edit(//abs/bff/**)", "Edit(//kit/.agent-state/p/tasks/t/01-x-receipt.md)"],
+        )
+
+    def test_reader_rules_are_receipt_only(self):
+        self.assertEqual(
+            launch_claude.derive_write_rules("reader", ["/abs/api"], "/kit/r.md"),
+            ["Edit(//kit/r.md)"],
+        )
+
+    def test_target_paths_are_normalized(self):
+        self.assertEqual(
+            launch_claude.derive_write_rules("writer", ["/abs/api/", "/abs/x/../bff"], "/kit/r.md")[:2],
+            ["Edit(//abs/api/**)", "Edit(//abs/bff/**)"],
+        )
+
+    def test_relative_target_refused(self):
+        with self.assertRaises(launch_claude.LaunchRefused):
+            launch_claude.derive_write_rules("writer", ["rel/api"], "/kit/r.md")
+
+    def test_relative_receipt_refused(self):
+        with self.assertRaises(launch_claude.LaunchRefused):
+            launch_claude.derive_write_rules("reader", [], "r.md")
+
+    def test_settings_shape(self):
+        settings = json.loads(launch_claude.build_settings(Path("/kit"), "/kit/r.md", "/kit/h.md"))
+        self.assertEqual(settings["worktree"], {"bgIsolation": "none"})
+        command = settings["hooks"]["Stop"][0]["hooks"][0]
+        self.assertEqual(command["type"], "command")
+        self.assertEqual(
+            shlex.split(command["command"]),
+            ["python3", "/kit/scripts/marina/__main__.py", "hook", "require-receipt", "--receipt", "/kit/r.md", "--handoff", "/kit/h.md"],
+        )
+
+    def test_hook_command_survives_spaces(self):
+        settings = json.loads(launch_claude.build_settings(Path("/my kit"), "/my kit/r 1.md", "/my kit/h 1.md"))
+        argv = shlex.split(settings["hooks"]["Stop"][0]["hooks"][0]["command"])
+        self.assertEqual(argv[1], "/my kit/scripts/marina/__main__.py")
+        self.assertEqual(argv[-3:], ["/my kit/r 1.md", "--handoff", "/my kit/h 1.md"])
 
 
 class ExtractShortIdTests(unittest.TestCase):
@@ -277,9 +334,11 @@ class _RecordingSubprocess:
         self.stdout = stdout
         self.returncode = returncode
         self.calls: list[list[str]] = []
+        self.kwargs: list[dict] = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        self.kwargs.append(kwargs)
         return subprocess.CompletedProcess(argv, self.returncode, stdout=self.stdout, stderr="")
 
 
@@ -329,6 +388,39 @@ class RunLaunchTests(unittest.TestCase):
             assignment = doc.get_assignment(1)
             self.assertEqual(assignment.state, "launched")
             self.assertEqual(assignment.native.id, "182689df")
+
+    def _launch_ok(self, fixture, recorder):
+        def ok_preflight(*args, **kwargs):
+            return preflight.run_preflight(
+                *args, which=_fake_which({"git"}), list_sessions=_no_sessions, **kwargs
+            )
+
+        return launch_claude.run_launch(
+            fixture.state_path, 1, kit_root=fixture.kit_root,
+            run_preflight=ok_preflight, run_subprocess=recorder,
+        )
+
+    def test_launch_closes_stdin(self):
+        # A child `claude` reads inherited stdin and acts on it (F1, X1).
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            recorder = _RecordingSubprocess("Started background session 182689df\n")
+            result = self._launch_ok(fixture, recorder)
+            self.assertTrue(result.ok, result.reasons)
+            self.assertIs(recorder.kwargs[0]["stdin"], subprocess.DEVNULL)
+
+    def test_launched_event_note_counts_write_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+            recorder = _RecordingSubprocess("Started background session 182689df\n")
+            result = self._launch_ok(fixture, recorder)
+            self.assertTrue(result.ok, result.reasons)
+            note = st.read_state(fixture.state_path).get_assignment(1).events[-1].note
+            self.assertIn("write_rules=2", note)
+            argv = recorder.calls[0]
+            receipt = str(fixture.kit_root / fixture.assignment.receipt)
+            self.assertIn(f"Edit(/{fixture.kit_root}/**)", argv)
+            self.assertIn(f"Edit(/{receipt})", argv)
 
     def test_no_id_captured_records_uncertain_not_launched(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -400,7 +492,8 @@ class RunLaunchTests(unittest.TestCase):
             self.assertEqual(len(recorder.calls), 1)
             argv = recorder.calls[0]
             self.assertEqual(argv[argv.index("--add-dir") + 1], str(fixture.kit_root))
-            self.assertEqual(argv[argv.index("--allowedTools") + 1], "Bash(git status --short)")
+            granted = argv[argv.index("--allowedTools") + 1:argv.index("--")]
+            self.assertEqual([r for r in granted if r.startswith("Bash(")], ["Bash(git status --short)"])
             self.assertNotIn("/wrong", argv)
             self.assertNotIn("Bash(echo wrong)", argv)
             self.assertNotIn("Bash(*)", argv)

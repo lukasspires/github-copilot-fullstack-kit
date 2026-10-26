@@ -8,8 +8,12 @@ constructing or launching anything on `preparation_failed`), launches at
 most one session per invocation, and records the observed outcome via
 `scripts.state` (never hand-edits `state.toml` text).
 
-Minimum tested Claude CLI version: 2.1.270 — the exact flags below were
-re-checked directly against the installed CLI on 2026-09-19:
+Minimum tested Claude CLI version: 2.1.306 — `--permission-mode dontAsk`
+denies (and records in `permission_denials`) every tool call outside
+`--allowedTools`; `Edit(//<abs>/**)` rules also bound `Write`; and a Stop
+hook passed through `--settings` fires in `--bg` sessions
+(docs/achados-f1-spike-hooks-e-juiza-2026-10.md). The flags below were
+first re-checked directly against the installed CLI on 2026-09-19:
 `--allowedTools`/`--allowed-tools <tools...>` takes a space-separated list
 in one flag invocation (confirmed via `claude --help`, not assumed from
 the single-entry example in docs/agent-workflow.md); `--add-dir
@@ -26,6 +30,13 @@ fake in every test). Refuses to construct `bypassPermissions`,
 or a bare/wildcard `--allowedTools` entry (`Bash`, `Bash(*)`) — see
 `LaunchRefused` and the explicit safe flag allowlist.
 
+File-write rules never come from the state's allowlist: `derive_write_rules`
+builds them at launch from the assignment (writer: one `Edit(//<target>/**)`
+per target; every role: `Edit(//<receipt>)`), and `build_settings` adds the
+Stop hook `scripts/marina/__main__.py hook require-receipt`, which keeps the
+session open until its receipt passes receipt-lint. The child's stdin is
+always closed: a `claude` child reads inherited stdin and acts on it.
+
 Runtime write scope: `--state`'s `state.toml` (native.* + one event) and
 the handoff metadata, inside `.agent-state/<project>/tasks/<task>/` — never `scripts/`, `tests/`,
 or a target repository.
@@ -35,7 +46,10 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -46,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts import common, handoff_sync, preflight
 from scripts.preflight import PreflightResult
 from scripts.state import append_event, read_state, write_state
-from scripts.state.model import StateError
+from scripts.state.model import StateError, mode_for_role
 
 CANONICAL_PROMPT = "Act as {role}. Read {profile} and {handoff}, then execute the assignment."
 
@@ -62,6 +76,7 @@ FORBIDDEN_EXTRA_ARG_TOKENS: tuple[str, ...] = (
     "--fork-session",
 )
 _BARE_ALLOWLIST_RE = re.compile(r"^Bash(?:\(\s*\*\s*\))?$", re.IGNORECASE)
+_FILE_WRITE_RULE_RE = re.compile(r"^(?:Edit|Write|NotebookEdit|MultiEdit)\b", re.IGNORECASE)
 
 _SHORT_ID_RE = re.compile(r"\b[0-9a-f]{8}\b")
 
@@ -141,6 +156,11 @@ def _check_forbidden_allowlist(allowlist: list[str]) -> None:
             raise LaunchRefused(
                 f"refusing to construct a bare/wildcard --allowedTools entry: {entry!r}"
             )
+        if _FILE_WRITE_RULE_RE.match(entry.strip()):
+            raise LaunchRefused(
+                "file-write rules are derived from the assignment's targets and receipt, "
+                f"never granted through the allowlist: {entry!r}"
+            )
 
 
 def _check_forbidden_extra_args(extra_args: list[str]) -> None:
@@ -159,34 +179,69 @@ def _check_forbidden_extra_args(extra_args: list[str]) -> None:
         index += 1
 
 
+def derive_write_rules(mode: str, targets: list[str], receipt: str) -> list[str]:
+    """File-write rules for one assignment: writers get each target, every role its receipt.
+
+    Paths must be absolute; they are normalized so a trailing slash or a
+    `..` component cannot produce a rule the CLI would not match. A leading
+    `/` on the absolute path yields the CLI's `Edit(//<abs>)` form.
+    """
+
+    paths = [*targets, receipt] if mode == "writer" else [receipt]
+    for path in paths:
+        if not os.path.isabs(path):
+            raise LaunchRefused(f"write rules need absolute paths, got {path!r}")
+    rules = [f"Edit(/{os.path.normpath(t)}/**)" for t in targets] if mode == "writer" else []
+    rules.append(f"Edit(/{os.path.normpath(receipt)})")
+    return rules
+
+
+def build_settings(kit_root: Path, receipt: str, handoff: str) -> str:
+    """The per-invocation `--settings` JSON: shared checkout plus the receipt Stop hook."""
+
+    command = shlex.join([
+        "python3", str(kit_root / "scripts" / "marina" / "__main__.py"),
+        "hook", "require-receipt", "--receipt", receipt, "--handoff", handoff,
+    ])
+    settings = {
+        "worktree": {"bgIsolation": "none"},
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]},
+    }
+    return json.dumps(settings, separators=(",", ":"), ensure_ascii=False)
+
+
 def build_argv(
     handoff: HandoffData,
     *,
     handoff_path: str,
+    receipt_path: str,
+    kit_root: Path,
     extra_args: list[str] | None = None,
     cli: str = "claude",
 ) -> list[str]:
     """Build the exact `claude --bg ...` argv for one already-`prepared` node.
 
     Never accepts `--permission-mode`/`--settings` overrides from the
-    caller — those two are always the fixed, authorized values
-    (`auto` / `{"worktree":{"bgIsolation":"none"}}`). `auto` is a distinct
-    mode, NOT `bypassPermissions`; the ban on `bypassPermissions` and
-    `--permission-prompts` still applies unchanged. `extra_args` accepts
-    only `--verbose` and a single `--model <name>` pair.
+    caller — the mode is always `dontAsk` and the settings always
+    `build_settings(...)`. Under `dontAsk` the `--allowedTools` list is the
+    real boundary: the launch-derived write rules (`derive_write_rules`)
+    come first, then the assignment's check-derived `Bash(...)` rules;
+    anything else is denied, not queued. The ban on `bypassPermissions`
+    and `--permission-prompts` still applies unchanged. `extra_args`
+    accepts only `--verbose` and a single `--model <name>` pair.
     """
 
     _check_forbidden_allowlist(handoff.allowlist)
     extra_args = list(extra_args or [])
     _check_forbidden_extra_args(extra_args)
+    write_rules = derive_write_rules(mode_for_role(handoff.role), handoff.targets, receipt_path)
 
     argv = [cli, "--bg", "--agent", handoff.role, "--name", f"{handoff.task} — {handoff.role} — {handoff.nn:02d} — {handoff.type_}"]
     for target in handoff.targets:
         argv += ["--add-dir", target]
-    argv += ["--settings", '{"worktree":{"bgIsolation":"none"}}']
-    argv += ["--permission-mode", "auto"]
-    if handoff.allowlist:
-        argv += ["--allowedTools", *handoff.allowlist]
+    argv += ["--settings", build_settings(kit_root, receipt_path, handoff_path)]
+    argv += ["--permission-mode", "dontAsk"]
+    argv += ["--allowedTools", *write_rules, *handoff.allowlist]
     argv += extra_args
     prompt = CANONICAL_PROMPT.format(role=handoff.role, profile=handoff.profile, handoff=handoff_path)
     argv += ["--", prompt]
@@ -286,16 +341,24 @@ def run_launch(
             profile=profile,
             targets=list(assignment.targets), allowlist=list(assignment.allowlist),
         )
-        argv = build_argv(handoff_data, handoff_path=str(handoff_path), extra_args=extra_args)
+        receipt_path = str(kit_root / assignment.receipt)
+        argv = build_argv(
+            handoff_data, handoff_path=str(handoff_path), receipt_path=receipt_path,
+            kit_root=kit_root, extra_args=extra_args,
+        )
+        write_rule_count = len(derive_write_rules(mode_for_role(assignment.role), handoff_data.targets, receipt_path))
     except (LaunchRefused, handoff_sync.HandoffError) as exc:
         return LaunchResult(ok=False, argv=None, reasons=[str(exc)], preflight_result=pre_result, notes=notes)
 
-    proc = run_subprocess(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    proc = run_subprocess(argv, capture_output=True, text=True, timeout=timeout, check=False, stdin=subprocess.DEVNULL)
     session_id = extract_short_id(proc.stdout) if proc.returncode == 0 else None
 
     if session_id:
         sync_note = f"; synchronized: {', '.join(sync_fields)}" if sync_fields else ""
-        append_event(assignment, "launched", by="launch-claude", note=f"id={session_id}{sync_note}")
+        append_event(
+            assignment, "launched", by="launch-claude",
+            note=f"id={session_id}; write_rules={write_rule_count}{sync_note}",
+        )
         assignment.native.platform = "claude"
         assignment.native.id = session_id
         write_state(state_path, doc)
