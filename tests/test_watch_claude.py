@@ -436,6 +436,68 @@ class RunWatchStateRecordingTests(unittest.TestCase):
         self.assertEqual(outcome.classification, "finished")
         self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "finished")
 
+    def _idle_session(self):
+        return _session(state="working", status="idle")
+
+    def test_idle_within_launch_grace_keeps_watching_until_recorded(self):
+        """F3 (F6 review): an idle end of turn seen while the node is still
+        `launched` and inside `LAUNCH_IDLE_GRACE` is not recorded, so it is
+        not a reportable `finished` yet; the watch keeps polling until the
+        grace passes and the write happens."""
+
+        _write_scratch_state(self.state_path, assignment_state="launched")
+        clock = _FakeClock(step=1)
+        queue = _Queue([[_session(state="working", status="busy")], [self._idle_session()]])
+        outcome = watch_claude.run_watch(
+            queue, interval=10, max_duration=1000, title_prefix="demo-task —",
+            nn=1, state_path=str(self.state_path),
+            sleep=lambda s: setattr(clock, "t", clock.t + s), clock=clock,
+            now=lambda: AT + datetime.timedelta(seconds=clock.t),
+        )
+        self.assertEqual(outcome.reason, watch_claude.REASON_STATE_CHANGED)
+        self.assertEqual(outcome.classification, "finished")
+        self.assertGreaterEqual(outcome.elapsed, 60)
+        self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "finished")
+
+    def test_idle_within_launch_grace_times_out_without_reporting_a_change(self):
+        _write_scratch_state(self.state_path, assignment_state="launched")
+        clock = _FakeClock(step=1)
+        queue = _Queue([[_session(state="working", status="busy")], [self._idle_session()]])
+        outcome = watch_claude.run_watch(
+            queue, interval=5, max_duration=20, title_prefix="demo-task —",
+            nn=1, state_path=str(self.state_path),
+            sleep=lambda s: setattr(clock, "t", clock.t + s), clock=clock,
+            now=lambda: AT + datetime.timedelta(seconds=clock.t),
+        )
+        self.assertEqual(outcome.reason, watch_claude.REASON_TIMED_OUT)
+        self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "launched")
+
+    def test_idle_within_launch_grace_without_state_still_exits(self):
+        _write_scratch_state(self.state_path, assignment_state="launched")
+        queue = _Queue([[_session(state="working", status="busy")], [self._idle_session()]])
+        outcome = watch_claude.run_watch(
+            queue, interval=5, max_duration=1000, title_prefix="demo-task —",
+            nn=1, sleep=lambda s: None, clock=_FakeClock(step=1),
+        )
+        self.assertEqual(outcome.reason, watch_claude.REASON_STATE_CHANGED)
+        self.assertEqual(outcome.classification, "finished")
+
+    def test_idle_skipped_for_another_reason_still_reports_the_change(self):
+        """Only the launch grace defers the report: `prepared -> finished`
+        is illegal, so the write is skipped and the change is reported."""
+
+        _write_scratch_state(self.state_path, assignment_state="prepared")
+        queue = _Queue([[_session(state="working", status="busy")], [self._idle_session()]])
+        outcome = watch_claude.run_watch(
+            queue, interval=5, max_duration=1000, title_prefix="demo-task —",
+            nn=1, state_path=str(self.state_path),
+            sleep=lambda s: None, clock=_FakeClock(step=1),
+            now=lambda: AT + datetime.timedelta(seconds=600),
+        )
+        self.assertEqual(outcome.reason, watch_claude.REASON_STATE_CHANGED)
+        self.assertEqual(outcome.classification, "finished")
+        self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "prepared")
+
 
 class MainCliStateArgumentValidationTests(unittest.TestCase):
     """`--state`/`--nn` required together at the CLI layer (Finding 2);

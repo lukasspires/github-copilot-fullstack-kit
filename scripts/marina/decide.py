@@ -17,6 +17,11 @@ Choices from docs/plano-f3-envelope-e-decide-2026-10.md:
   stage, because G3 requires the same role and type as its predecessor.
 - decision 1: the gray zone of `gate` is not consulted; with
   `max_corrections <= 1` a second consecutive FAIL always stops first.
+
+F6 finding A4 (part 1): a `substitui` node that Marina opens for a node in
+`receipt_missing`/`receipt_invalid` stands for that node (same role, type,
+targets and allowlist, once per node), so the run can resume. The runner
+itself never opens one.
 """
 
 from __future__ import annotations
@@ -25,12 +30,13 @@ import dataclasses
 
 from scripts.gate import find_fail_review_chain
 from scripts.marina.envelope import Envelope
-from scripts.state import Assignment, ReceiptSummary, StateDoc
+from scripts.state import Assignment, ReceiptSummary, StateDoc, effective_edge
 
 EDGE_TYPE = {"inicia": "implementação", "prossegue": "implementação", "revisa": "revisão", "corrige": "correção"}
 _WRITER_EDGES = ("inicia", "prossegue", "corrige")
 # Edge of the predecessor each expansion edge may follow (spec 3.2, decision 9).
 _PREDECESSOR_EDGES = {"prossegue": ("inicia", "prossegue"), "revisa": _WRITER_EDGES, "corrige": ("revisa",)}
+_REPLACEABLE = ("receipt_missing", "receipt_invalid")
 _RUNNING = ("launched", "working")
 _CLOSED_BY_STATUS = {
     "done": "accepted",
@@ -104,7 +110,7 @@ def stage_of(doc: StateDoc, nn: int) -> int:
         return 1
     if a.edge == "prossegue":
         return stage_of(doc, a.predecessor) + 1
-    if a.edge in ("revisa", "corrige"):
+    if a.edge in ("revisa", "corrige", "substitui"):
         return stage_of(doc, a.predecessor)
     raise ValueError(f"nn={nn}: edge {a.edge!r} is outside the envelope's expansion")
 
@@ -119,45 +125,83 @@ def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
     if sum(a.edge == "inicia" for a in nodes) > 1:
         errors.append("more than one inicia node")
     by_nn = {a.nn: a for a in nodes}
+    # Replaced node -> its first replacement, known before the walk: any other
+    # node must follow the replacement, or the second-FAIL chain gets shorter.
+    replacements: dict[int, int] = {}
+    for a in nodes:
+        if a.edge == "substitui":
+            replacements.setdefault(a.predecessor, a.nn)
+    seen: set[int] = set()
     for a in nodes:
         if tuple(a.targets) != env.targets:
             errors.append(f"nn={a.nn}: targets {a.targets} differ from the envelope's")
-        shape = _shape_error(a, by_nn)
+        shape = _shape_error(doc, a, by_nn)
         if shape:
             errors.append(shape)
             continue
+        if a.edge != "substitui" and a.predecessor in replacements:
+            errors.append(f"nn={a.nn}: predecessor nn={a.predecessor} was replaced by "
+                          f"nn={replacements[a.predecessor]}; follow the replacement")
+        if a.edge == "substitui":
+            if a.predecessor in seen:
+                errors.append(f"nn={a.nn}: nn={a.predecessor} was already replaced")
+            seen.add(a.predecessor)
+            if tuple(a.allowlist) != env.allowlist:
+                errors.append(f"nn={a.nn}: substitui allowlist differs from the envelope's")
+        edge = effective_edge(doc, a)
         stage = stage_of(doc, a.nn)
         if stage > len(env.stages):
             errors.append(f"nn={a.nn}: stage {stage} is beyond the envelope's {len(env.stages)} stage(s)")
-        elif a.edge in _WRITER_EDGES and a.role != env.stages[stage - 1].role:
+        elif edge in _WRITER_EDGES and a.role != env.stages[stage - 1].role:
             errors.append(f"nn={a.nn}: role {a.role!r} differs from stage {stage}'s {env.stages[stage - 1].role!r}")
-        if a.edge == "revisa" and a.role != "reviewer":
+        if edge == "revisa" and a.role != "reviewer":
             errors.append(f"nn={a.nn}: revisa must use the reviewer role, got {a.role!r}")
     return errors
 
 
-def _shape_error(a: Assignment, by_nn: dict[int, Assignment]) -> str:
+def _shape_error(doc: StateDoc, a: Assignment, by_nn: dict[int, Assignment]) -> str:
     """Edge, type and predecessor shape the expansion produces; "" when it fits.
 
     Predecessors must point to an earlier node, so `stage_of` always terminates.
+    A predecessor's edge is its effective one, so a replacement is followed
+    like the node it replaces.
     """
 
-    if a.edge not in EDGE_TYPE:
+    if a.edge not in EDGE_TYPE and a.edge != "substitui":
         return f"nn={a.nn}: edge {a.edge!r} is outside the envelope's expansion"
-    if a.type != EDGE_TYPE[a.edge]:
+    if a.edge in EDGE_TYPE and a.type != EDGE_TYPE[a.edge]:
         return f"nn={a.nn}: type {a.type!r} does not match edge {a.edge!r}"
     if a.edge == "inicia":
         return "" if a.predecessor == 0 else f"nn={a.nn}: inicia must have predecessor 0"
     pred = by_nn.get(a.predecessor)
     if pred is None or a.predecessor >= a.nn:
         return f"nn={a.nn}: predecessor {a.predecessor} is not an earlier node"
-    if pred.edge not in _PREDECESSOR_EDGES[a.edge]:
-        return f"nn={a.nn}: {a.edge} cannot follow a {pred.edge} node (nn={pred.nn})"
+    if a.edge == "substitui":
+        return _replacement_error(a, pred)
+    pred_edge = effective_edge(doc, pred)
+    if pred_edge not in _PREDECESSOR_EDGES[a.edge]:
+        return f"nn={a.nn}: {a.edge} cannot follow a {pred_edge} node (nn={pred.nn})"
+    return ""
+
+
+def _replacement_error(a: Assignment, pred: Assignment) -> str:
+    """A `substitui` replaces one expansion node that ended without a usable receipt."""
+
+    if pred.edge not in EDGE_TYPE:
+        return f"nn={a.nn}: substitui cannot replace a {pred.edge} node (nn={pred.nn})"
+    if pred.state not in _REPLACEABLE:
+        return f"nn={a.nn}: substitui requires nn={pred.nn} in receipt_missing/receipt_invalid, got {pred.state!r}"
+    if (a.role, a.type) != (pred.role, pred.type):
+        return f"nn={a.nn}: substitui must keep nn={pred.nn}'s role and type ({pred.role!r}, {pred.type!r})"
     return ""
 
 
 def _stage_opener(doc: StateDoc, stage: int) -> Assignment:
-    return next(a for a in doc.assignments if a.edge in ("inicia", "prossegue") and stage_of(doc, a.nn) == stage)
+    """The stage's opening writer; a replacement comes after the node it replaces."""
+
+    openers = [a for a in doc.assignments
+               if effective_edge(doc, a) in ("inicia", "prossegue") and stage_of(doc, a.nn) == stage]
+    return max(openers, key=lambda a: a.nn)
 
 
 def _launch(env: Envelope, *, role: str, edge: str, predecessor: int, stage: int) -> Decision:
@@ -172,7 +216,7 @@ def _launch(env: Envelope, *, role: str, edge: str, predecessor: int, stage: int
 
 def _after_writer(doc: StateDoc, env: Envelope, writer: Assignment) -> Decision:
     stage = stage_of(doc, writer.nn)
-    if writer.edge == "corrige" or env.review == "each_stage" or stage == len(env.stages):
+    if effective_edge(doc, writer) == "corrige" or env.review == "each_stage" or stage == len(env.stages):
         return _launch(env, role="reviewer", edge="revisa", predecessor=writer.nn, stage=stage)
     return _launch(env, role=env.stages[stage].role, edge="prossegue", predecessor=writer.nn, stage=stage + 1)
 
@@ -207,6 +251,7 @@ def _after_fail(doc: StateDoc, env: Envelope, reviewer: Assignment) -> Decision:
     if len(find_fail_review_chain(doc, reviewer.nn)) >= 2:
         return _stop("second_fail")
     stage = stage_of(doc, reviewer.nn)
+    # A replaced `corrige` counts once: by its original, never by its `substitui`.
     corrections = sum(1 for a in doc.assignments if a.edge == "corrige" and stage_of(doc, a.nn) == stage)
     if corrections >= env.max_corrections:
         return _stop("max_corrections")
@@ -259,7 +304,7 @@ def _decide_for_state(doc: StateDoc, env: Envelope, current: Assignment, obs: Ob
             return _stop("receipt_summary_missing")
         return Decision("transition", nn=nn, to=_CLOSED_BY_STATUS[current.receipt_summary.status])
     if state == "accepted":
-        if current.edge == "revisa":
+        if effective_edge(doc, current) == "revisa":
             return _after_reviewer(doc, env, current, obs)
         return _after_writer(doc, env, current)
     return _stop(state)

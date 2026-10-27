@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import scripts.state as st
+from scripts.gate import find_fail_review_chain
 from scripts.marina import decide as dm
 from scripts.marina import envelope as env_mod
 from scripts.marina.decide import Decision, NodeSpec, Observations, Question
@@ -84,9 +85,9 @@ class Graph:
 
     def add(self, role: str, edge: str, predecessor: int, state: str = "accepted", *, verdict: str = "",
             status: str = "done", targets: list[str] | None = None, allowlist: list[str] | None = None,
-            digest: list[str] | None = None) -> int:
+            digest: list[str] | None = None, type_: str | None = None) -> int:
         a = st.add_assignment(
-            self.doc, role=role, type_=dm.EDGE_TYPE.get(edge, "análise"), edge=edge, predecessor=predecessor,
+            self.doc, role=role, type_=type_ or dm.EDGE_TYPE.get(edge, "análise"), edge=edge, predecessor=predecessor,
             targets=targets or [TARGET], allowlist=ALLOW if allowlist is None else allowlist, at=AT,
         )
         for to in _PATHS[state]:
@@ -102,6 +103,13 @@ class Graph:
 
     def review(self, predecessor: int, verdict: str, state: str = "accepted", **kw) -> int:
         return self.add("reviewer", "revisa", predecessor, state, verdict=verdict, **kw)
+
+    def replace(self, nn: int, state: str = "accepted", **kw) -> int:
+        """A `substitui` node with the replaced node's role and type, as Marina opens it."""
+
+        original = self.doc.get_assignment(nn)
+        kw.setdefault("type_", original.type)
+        return self.add(original.role, "substitui", nn, state, **kw)
 
 
 def decide(graph: Graph, env=None, obs=None, **env_overrides) -> Decision:
@@ -426,6 +434,233 @@ class AcceptedReviewerTests(unittest.TestCase):
         w = g.writer()
         g.review(w, "")
         self.assertEqual(decide(g), Decision("stop", reason="verdict_missing"))
+
+
+class ReplacementTests(unittest.TestCase):
+    """A4 part 1: a `substitui` opened by Marina stands for the node it replaces."""
+
+    def test_acc_envelope_graph_is_done(self):
+        # marina-acc/acc-envelope: inicia accepted, revisa receipt_missing, substitui accepted PASS.
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "", "receipt_missing")
+        g.replace(r, verdict="PASS")
+        env = make_env(stages=[{"role": ROLE, "handoff": "01-h.md"}])
+        self.assertEqual(dm.graph_errors(g.doc, env), [])
+        self.assertEqual(decide(g, env=env), Decision("done"))
+
+    def test_replacement_accepted_without_receipt_summary_stops(self):
+        # acc-envelope's nn=03 was accepted with `state set`, which records no receipt summary.
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "", "receipt_missing")
+        n = g.replace(r, verdict="PASS")
+        g.doc.get_assignment(n).receipt_summary = None
+        self.assertEqual(decide(g), Decision("stop", reason="verdict_missing"))
+
+    def test_replaced_reviewer_pass_opens_next_stage(self):
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "", "receipt_invalid")
+        g.replace(r, verdict="PASS")
+        self.assertEqual(decide(g).node, NodeSpec(ROLE, "implementação", "prossegue", w, (TARGET,), tuple(ALLOW), 2))
+
+    def test_replaced_opener_is_reviewed_and_followed(self):
+        g = Graph()
+        w1 = g.writer(state="receipt_invalid")
+        w2 = g.replace(w1)
+        self.assertEqual(
+            decide(g).node, NodeSpec("reviewer", "revisão", "revisa", w2, (TARGET,), tuple(ALLOW), 1)
+        )
+        g.review(w2, "PASS")
+        self.assertEqual(decide(g).node, NodeSpec(ROLE, "implementação", "prossegue", w2, (TARGET,), tuple(ALLOW), 2))
+
+    def test_replaced_reviewer_fail_opens_corrige_after_the_replacement(self):
+        g = Graph()
+        w = g.writer()
+        r1 = g.review(w, "", "receipt_missing")
+        r2 = g.replace(r1, verdict="FAIL")
+        d = decide(g)
+        self.assertEqual((d.node.edge, d.node.role, d.node.predecessor, d.node.stage), ("corrige", ROLE, r2, 1))
+        g.writer("corrige", r2, "reserved")
+        self.assertEqual(check_edge_compatibility(g.doc), [])
+
+    def test_replaced_reviewer_pass_with_risks_asks_about_the_replacement(self):
+        g = Graph()
+        w = g.writer()
+        r1 = g.review(w, "", "receipt_missing")
+        r2 = g.replace(r1, verdict="PASS_WITH_RISKS")
+        self.assertEqual(
+            decide(g), Decision("ask_judge", question=Question("pass_with_risks", r2, ("continue", "stop")))
+        )
+
+    def test_replaced_corrige_is_reviewed_as_a_correction(self):
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "FAIL")
+        c1 = g.writer("corrige", r, "receipt_missing")
+        c2 = g.replace(c1)
+        d = decide(g, review="final")
+        self.assertEqual((d.node.edge, d.node.predecessor, d.node.stage), ("revisa", c2, 1))
+
+    def test_second_fail_is_found_through_a_replaced_reviewer(self):
+        g = Graph()
+        w = g.writer()
+        r1 = g.review(w, "FAIL", digest=["a"])
+        c = g.writer("corrige", r1)
+        r2 = g.review(c, "", "receipt_missing")
+        r3 = g.replace(r2, verdict="FAIL", digest=["a"])
+        self.assertEqual([a.nn for a in find_fail_review_chain(g.doc, r3)], [r3, r1])
+        self.assertEqual(decide(g), Decision("stop", reason="second_fail"))
+
+    def test_second_fail_is_found_through_a_replaced_corrige(self):
+        g = Graph()
+        w = g.writer()
+        r1 = g.review(w, "FAIL", digest=["a"])
+        c1 = g.writer("corrige", r1, "receipt_invalid")
+        c2 = g.replace(c1)
+        r2 = g.review(c2, "FAIL", digest=["a"])
+        self.assertEqual([a.nn for a in find_fail_review_chain(g.doc, r2)], [r2, r1])
+        self.assertEqual(decide(g), Decision("stop", reason="second_fail"))
+
+    def test_replaced_corrige_counts_once_in_its_stage(self):
+        g = Graph()
+        w1 = g.writer()
+        r1 = g.review(w1, "FAIL")
+        c1 = g.writer("corrige", r1, "receipt_missing")
+        c2 = g.replace(c1)
+        g.review(c2, "PASS")
+        w2 = g.writer("prossegue", w1)
+        r3 = g.review(w2, "FAIL")
+        self.assertEqual([dm.stage_of(g.doc, n) for n in (c1, c2, w2)], [1, 1, 2])
+        d = decide(g)
+        self.assertEqual((d.kind, d.node.edge, d.node.predecessor, d.node.stage), ("launch", "corrige", r3, 2))
+
+    def test_failed_replacement_stops_like_any_node(self):
+        for state in ("receipt_missing", "receipt_invalid"):
+            with self.subTest(state=state):
+                g = Graph()
+                w = g.writer()
+                r = g.review(w, "", "receipt_missing")
+                g.replace(r, state)
+                self.assertEqual(decide(g), Decision("stop", reason=state))
+
+    def test_graph_errors_refuse_replacements_outside_the_contract(self):
+        def accepted_predecessor(g):
+            w = g.writer()
+            g.replace(w, "working")
+
+        def replaced_replacement(g):
+            w = g.writer()
+            r1 = g.review(w, "", "receipt_missing")
+            r2 = g.replace(r1, "receipt_missing")
+            g.replace(r2, "working")
+
+        def terminal_without_receipt(state):
+            def build(g):
+                w = g.writer()
+                r = g.review(w, "", state)
+                g.replace(r, "working")
+            return build
+
+        def different(**kw):
+            def build(g):
+                w = g.writer()
+                r = g.review(w, "", "receipt_missing")
+                g.replace(r, "working", **kw)
+            return build
+
+        def duplicate(g):
+            w = g.writer()
+            r = g.review(w, "", "receipt_missing")
+            g.replace(r, "receipt_missing")
+            g.replace(r, "working")
+
+        def dangling(predecessor):
+            def build(g):
+                w = g.writer()
+                r = g.review(w, "", "receipt_missing")
+                n = g.replace(r, "working")
+                g.doc.get_assignment(n).predecessor = predecessor(n)
+            return build
+
+        def other_allowlist(g):
+            w = g.writer()
+            r = g.review(w, "", "receipt_missing")
+            g.replace(r, verdict="PASS", allowlist=["Bash(mvn verify)"])
+            g.writer("prossegue", w, "working")
+
+        def other_role(g):
+            w = g.writer()
+            r = g.review(w, "", "receipt_missing")
+            g.add("architect", "substitui", r, "working", type_="revisão")
+
+        cases = {
+            "accepted predecessor": accepted_predecessor,
+            "replaces a substitui": replaced_replacement,
+            "preparation_failed": terminal_without_receipt("preparation_failed"),
+            "abandoned": terminal_without_receipt("abandoned"),
+            "other role": other_role,
+            "other type": different(type_="análise"),
+            "other targets": different(targets=["/other"]),
+            "other allowlist": other_allowlist,
+            "duplicate": duplicate,
+            "missing predecessor": dangling(lambda n: 99),
+            "later predecessor": dangling(lambda n: n),
+        }
+        for name, build in cases.items():
+            with self.subTest(case=name):
+                g = Graph()
+                build(g)
+                self.assertNotEqual(dm.graph_errors(g.doc, make_env()), [])
+                d = decide(g)
+                self.assertEqual((d.kind, d.reason.split(":")[0]), ("stop", "graph_outside_envelope"))
+
+    def test_nodes_must_follow_the_replacement_not_the_replaced_node(self):
+        # nn=08 finding F2: a stale predecessor would shorten the second-FAIL chain.
+        def corrige_after_replaced_reviewer(g):
+            w = g.writer()
+            r1 = g.review(w, "", "receipt_missing")
+            g.replace(r1, verdict="FAIL")
+            g.writer("corrige", r1, "working")
+
+        def revisa_after_replaced_writer(g):
+            w1 = g.writer(state="receipt_invalid")
+            g.replace(w1)
+            g.review(w1, "", "working")
+
+        def prossegue_after_replaced_opener(g):
+            w1 = g.writer(state="receipt_missing")
+            w2 = g.replace(w1)
+            g.review(w2, "PASS")
+            g.writer("prossegue", w1, "working")
+
+        cases = {
+            "corrige": corrige_after_replaced_reviewer,
+            "revisa": revisa_after_replaced_writer,
+            "prossegue": prossegue_after_replaced_opener,
+        }
+        for name, build in cases.items():
+            with self.subTest(edge=name):
+                g = Graph()
+                build(g)
+                errors = dm.graph_errors(g.doc, make_env())
+                self.assertTrue(any("was replaced" in e for e in errors), errors)
+                self.assertEqual(decide(g).reason.split(":")[0], "graph_outside_envelope")
+
+    def test_effective_node_helpers(self):
+        g = Graph()
+        w = g.writer()
+        r1 = g.review(w, "", "receipt_missing")
+        r2 = g.replace(r1, verdict="PASS")
+        doc = g.doc
+        self.assertEqual(st.replaced_node(doc, doc.get_assignment(r2)).nn, r1)
+        self.assertEqual(st.effective_edge(doc, doc.get_assignment(r2)), "revisa")
+        self.assertEqual(st.effective_edge(doc, doc.get_assignment(w)), "inicia")
+        self.assertEqual(st.reviewed_writer(doc, doc.get_assignment(r2)).nn, w)
+        self.assertEqual(st.reviewed_writer(doc, doc.get_assignment(r1)).nn, w)
+        doc.get_assignment(r2).predecessor = r2
+        self.assertEqual(st.effective_edge(doc, doc.get_assignment(r2)), "substitui")
 
 
 class HelperTests(unittest.TestCase):

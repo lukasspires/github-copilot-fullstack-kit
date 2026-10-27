@@ -50,7 +50,7 @@ class Fixture:
         self.raw = {
             "targets": [str(self.target)],
             "branches": {str(self.target): "feat/x"},
-            "allowlist": ["Bash(true)"],
+            "allowlist": [f"Bash(test -d {self.target})"],
             "review": "each_stage",
             "max_corrections": 1,
             "max_duration": "8h",

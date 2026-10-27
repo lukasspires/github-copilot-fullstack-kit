@@ -31,6 +31,7 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 - [Pré-requisitos](#pré-requisitos)
 - [Início rápido](#início-rápido)
 - [Como uma tarefa é executada](#como-uma-tarefa-é-executada)
+- [Cadeias sem supervisão (`marina run`)](#cadeias-sem-supervisão-marina-run)
 - [Equipe de agentes](#equipe-de-agentes)
 - [Configuração nativa](#configuração-nativa)
 - [Skills principais](#skills-principais)
@@ -102,6 +103,26 @@ Preservar o contrato atual do endpoint /v1/pacientes. Critério: testes existent
 9. **Consolidação** — Marina reporta evidência por critério de aceitação, resultado da revisão, riscos remanescentes e checks pulados.
 
 Se a plataforma não conseguir abrir sessões visíveis, a sessão principal assume a especialidade e registra no checkpoint e na resposta: `delegação visível indisponível: <motivo>; especialidade <papel> assumida na sessão principal`. Esse fallback não é revisão independente. Criação com resultado incerto é reconciliada no gerenciador de sessões antes de qualquer nova tentativa.
+
+## Cadeias sem supervisão (`marina run`)
+
+Uma cadeia implementação → revisão → correção → revisão pode avançar sem você presente, mas só dentro de um **envelope** que você aprovou antes. O envelope é a tabela opcional `[envelope]` do `state.toml` da tarefa e contém:
+
+- os estágios (um papel writer, o mesmo em todos, cada um com um template `stage-<n>-handoff-template.md` contendo `Objective`, `Write scope` e `Acceptance criteria`);
+- os alvos com o branch esperado de cada um;
+- a allowlist, que vale também para reviewers e correções;
+- o modo de revisão (`each_stage` ou `final`), `max_corrections` (0 ou 1), `max_duration`, `judge_max_calls` e o que fazer com `PASS_WITH_RISKS` (`accept`, `judge` ou `stop`).
+
+| Comando | O que faz |
+|---|---|
+| `bin/marina approve <projeto> <tarefa>` | Mostra o envelope e grava a aprovação depois que você digita o slug da tarefa; só funciona num terminal interativo. O hash cobre o envelope e os templates: editar qualquer um invalida a aprovação. |
+| `bin/marina run <projeto> <tarefa> --interval 30 --max-duration 2h` | Abre, um nó por vez, só os nós da expansão do envelope, pelo caminho de sempre (Git Gate entre writers, `gate`, `state add`, handoff gerado, preflight, `launch_claude`). Para com o motivo numa seção gerada do checkpoint: envelope ou branch alterado, mudança alheia entre writers, segundo `FAIL` seguido, falha da juíza, receipt ausente ou inválido, limite de tempo, erro, Ctrl-C ou `marina stop`. |
+| `bin/marina status <projeto> <tarefa>` | Trava, aprovação do envelope e nós da tarefa. |
+| `bin/marina stop <projeto> <tarefa>` | Pede ao `run` que pare na próxima iteração. |
+
+A única decisão ambígua delegada é `PASS_WITH_RISKS` com `on_pass_with_risks = "judge"`: a juíza `marina-judge`, só de leitura, escolhe entre as opções oferecidas, até `judge_max_calls` vezes, e cada chamada fica em `judge-calls.jsonl`. O runner nunca responde a aprovação nativa, nunca relança um launch incerto e escreve só no diretório da tarefa. Um processo morto à força deixa a trava órfã, que `marina run --recover` assume só quando nenhuma sessão da tarefa está trabalhando.
+
+Para a Marina interativa, `.mcp.json` registra o servidor `marina mcp`, com 12 ferramentas `mcp__marina__*` e nenhuma de aprovação. As sete de leitura (`task_status`, `envelope_show`, `sessions`, `next_nn`, `gate_check`, `decision_preview`, `handoff_validate`) são pré-aprovadas em `.claude/settings.json`; as de escrita e ação (`envelope_draft`, `state_reserve`, `launch_node`, `run_start`, `run_stop`) pedem permissão; as quatro primeiras recusam enquanto um `run` estiver ativo, e o `run_stop` é justamente o jeito de pedir a parada desse `run`. O Claude Code pede para aprovar o servidor no primeiro uso, num diálogo que já vem com "Continue without using this MCP server" selecionado: escolha "Use this MCP server", porque um Enter direto recusa o servidor e ele some do `/mcp`. Depois de uma recusa, `claude mcp reset-project-choices` na raiz do kit traz o diálogo de volta. As sessões automáticas (`launch_claude` e a juíza) rodam com `--strict-mcp-config`, porque o `.mcp.json` do projeto pararia cada uma num diálogo interativo. Detalhes em [docs/agent-workflow.md](docs/agent-workflow.md#approved-envelopes-marina-run).
 
 ## Equipe de agentes
 
@@ -305,17 +326,23 @@ Estas skills aplicam-se **apenas** a projetos com evidência de governança da S
 
 ## Ferramentas do kit (`scripts/`)
 
-Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem dependência externa. Cobrem a Etapa 1 do modelo de estado estruturado ([docs/plano-estado-estruturado-e-grafos.md](docs/plano-estado-estruturado-e-grafos.md)); rode todos a partir da raiz do kit:
+Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem dependência externa. Rode todos a partir da raiz do kit.
 
-| Comando | O que faz |
-|---|---|
-| `python3 scripts/kit_lint.py` | Perfis `.claude/agents`, ausência de `.codex/`/`.agents/`, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture, e roda a suíte `unittest` |
-| `python3 -m unittest discover -s tests` | Suíte de testes isolada (fixtures em `tests/fixtures/`, nunca o `.agent-state/` real) |
-| `python3 scripts/state_lint.py [caminho/state.toml]` | As 8 invariantes do schema v0 (seção 5 do plano); usa a fixture versionada se nenhum caminho for informado |
-| `python3 scripts/preflight.py` | Gate de preparação `reserved → prepared \| preparation_failed` (seção 4.1 da análise) |
-| `python3 scripts/receipt_lint.py <receipt> --handoff <handoff>` | Valida a forma de um receipt e extrai `risks_digest` |
+| Comando | O que faz | O que grava |
+|---|---|---|
+| `python3 scripts/kit_lint.py` | Perfis `.claude/agents`, ausência de `.codex/`/`.agents/`, `git diff --check`, cabeçalhos de versão mínima do CLI, `state-lint` na fixture e a suíte `unittest` | nada |
+| `python3 -m unittest discover -s tests` | Suíte de testes isolada (fixtures em `tests/fixtures/`, nunca o `.agent-state/` real) | nada |
+| `python3 -m scripts.state init\|add\|set\|next-nn` | Cria o `state.toml` da tarefa, reserva nós, registra transições G2 | o `state.toml` da tarefa |
+| `python3 scripts/state_lint.py [state.toml]` | As 8 invariantes do estado estruturado; usa a fixture versionada sem caminho | nada |
+| `python3 scripts/gate.py --state … --role … --edge … --predecessor … --target …` | Avalia um nó proposto (P0, P_writer, P_reader, P_progresso) e responde ALLOW ou os motivos | nada |
+| `python3 scripts/preflight.py --state … --nn … --kit-root …` | Gate de preparação `reserved → prepared \| preparation_failed`; grava `git-before-NN.txt` | `state.toml`, handoff sincronizado, `git-before-NN.txt` |
+| `python3 scripts/launch_claude.py --state … --nn … --kit-root …` | Monta e lança o `claude --bg` do nó (`dontAsk`, regras de escrita derivadas, Stop hook, `--strict-mcp-config`) | `state.toml` |
+| `python3 scripts/status_claude.py …` / `python3 scripts/watch_claude.py …` | Observa o manager nativo e, com `--state`/`--nn`, registra a transição observada | `state.toml` (só com `--state`) |
+| `python3 scripts/receipt_lint.py <receipt> --handoff <handoff>` | Valida a forma de um receipt e extrai `risks_digest` | nada |
+| `bin/marina approve\|run\|status\|stop\|mcp` | Envelope aprovado, `marina run` e o servidor MCP (ver [Cadeias sem supervisão](#cadeias-sem-supervisão-marina-run)) | só o diretório da tarefa |
+| `bin/marina hook require-receipt` | Stop hook das sessões em background: impede o encerramento sem receipt válido | nada |
 
-Estes scripts formalizam checks mecânicos; roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da Marina. Nenhum lança sessões nem responde aprovações nativas. `gate`, `launch-claude`, `status-claude`, `watch-claude`, `reconcile` e `handoff new` (Etapas 2–3) ainda não existem — ver o papel `kit-tooling` na tabela de equipe.
+Estes scripts formalizam checks mecânicos. Roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da Marina, exceto dentro de um envelope que você aprovou, onde o `marina run` segue a expansão do envelope e para em tudo que fuja dela. Nenhum script responde aprovações nativas.
 
 ## Documentação relacionada
 

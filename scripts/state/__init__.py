@@ -64,6 +64,9 @@ __all__ = [
     "set_state",
     "next_nn",
     "get_assignment",
+    "replaced_node",
+    "effective_edge",
+    "reviewed_writer",
 ]
 
 
@@ -100,6 +103,33 @@ def _now() -> datetime.datetime:
 
 def get_assignment(doc: StateDoc, nn: int) -> Assignment:
     return doc.get_assignment(nn)
+
+
+def replaced_node(doc: StateDoc, a: Assignment) -> Assignment:
+    """The node `a` stands for: through `substitui` links, the first node that is not one.
+
+    A link whose predecessor is missing or not earlier ends the walk, so a
+    malformed graph returns a `substitui` node instead of looping.
+    """
+
+    while a.edge == "substitui":
+        pred = next((p for p in doc.assignments if p.nn == a.predecessor), None)
+        if pred is None or pred.nn >= a.nn:
+            break
+        a = pred
+    return a
+
+
+def effective_edge(doc: StateDoc, a: Assignment) -> str:
+    """`a.edge`, or for a `substitui` node the edge of the node it replaces."""
+
+    return replaced_node(doc, a).edge
+
+
+def reviewed_writer(doc: StateDoc, reviewer: Assignment) -> Assignment:
+    """The writer a `revisa` reviewer (or its `substitui` replacement) reviews."""
+
+    return doc.get_assignment(replaced_node(doc, reviewer).predecessor)
 
 
 def append_event(

@@ -172,15 +172,48 @@ def _run_git_checked(args: list[str], *, cwd: str, timeout: int) -> str:
     return proc.stdout
 
 
-def git_status_diff(target: str, *, timeout: int = 15, runner: Callable[..., str] = _run_git) -> str:
+def _untracked_paths(status_z: str) -> list[str]:
+    """Untracked paths from `git status --porcelain=v1 -z --untracked-files=all`, sorted."""
+
+    entries = status_z.split("\0")
+    untracked: list[str] = []
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        if entry.startswith("?? "):
+            untracked.append(entry[3:])
+        elif entry[:1] in ("R", "C"):
+            index += 1  # a rename/copy entry is followed by its source path
+        index += 1
+    return sorted(untracked)
+
+
+def git_status_diff(
+    target: str,
+    *,
+    timeout: int = 15,
+    runner: Callable[..., str] = _run_git,
+    read_bytes: Callable[[Path], bytes] = Path.read_bytes,
+) -> str:
     """Read-only `git status --short` + `git diff --stat` for one target.
 
-    Format matches the kit's existing `git-before-NN.txt` convention.
+    Format matches the kit's existing `git-before-NN.txt` convention, followed
+    by the sha256 of each untracked file in `git_snapshot`'s format, so a
+    reviewer can compare it with `git-after-NN.txt` (F6 acceptance A7). An
+    unreadable file is listed as `unreadable`, never skipped silently.
     """
 
     status = runner(["status", "--short"], cwd=target, timeout=timeout)
     diff_stat = runner(["diff", "--stat"], cwd=target, timeout=timeout)
-    return f"# git status --short\n{status}\n# git diff --stat\n{diff_stat}"
+    status_z = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=target, timeout=timeout)
+    hashes = []
+    for path in _untracked_paths(status_z):
+        try:
+            digest = hashlib.sha256(read_bytes(Path(target) / path)).hexdigest()
+        except OSError:
+            digest = "unreadable"
+        hashes.append(f"{digest}  {path}\n")
+    return f"# git status --short\n{status}\n# git diff --stat\n{diff_stat}# untracked sha256\n" + "".join(hashes)
 
 
 def git_snapshot(
@@ -204,17 +237,7 @@ def git_snapshot(
     status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=target, timeout=timeout)
     diff = runner(["diff", "HEAD", "--binary"], cwd=target, timeout=timeout)
     entries = status.split("\0")
-    untracked: list[str] = []
-    index = 0
-    while index < len(entries):
-        entry = entries[index]
-        if entry.startswith("?? "):
-            untracked.append(entry[3:])
-        elif entry[:1] in ("R", "C"):
-            index += 1  # a rename/copy entry is followed by its source path
-        index += 1
-    untracked.sort()
-    hashes = [f"{hashlib.sha256(read_bytes(Path(target) / path)).hexdigest()}  {path}" for path in untracked]
+    hashes = [f"{hashlib.sha256(read_bytes(Path(target) / path)).hexdigest()}  {path}" for path in _untracked_paths(status)]
     readable_status = "\n".join(e for e in entries if e)
     return (
         f"# git status --porcelain=v1 -z --untracked-files=all\n{readable_status}\n"

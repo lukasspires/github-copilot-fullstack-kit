@@ -412,6 +412,21 @@ class PositivePreflightTest(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertTrue(any("already working" in r for r in result.reasons))
 
+    def test_session_that_ended_its_turn_as_working_idle_does_not_block(self):
+        # F6 acceptance: a finished --bg session stayed `working`/`idle`; preflight must
+        # classify it the way status_claude does instead of reading `state` alone.
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])
+
+            def idle_session() -> list[dict]:
+                return [{"name": "demo-task — node-backend — 07 — implementação", "state": "working", "status": "idle"}]
+
+            result = preflight.run_preflight(
+                fixture.state_path, 1, kit_root=fixture.kit_root, now=AT, which=_fake_which({"git"}),
+                list_sessions=idle_session,
+            )
+            self.assertFalse(any("already working" in r for r in result.reasons), result.reasons)
+
     def test_manager_unavailable_is_noted_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _KitFixture(Path(tmp), allowlist=["Bash(git status --short)"])

@@ -251,6 +251,31 @@ def _handoff_errors(env: Envelope, task_dir: Path) -> list[str]:
     return errors
 
 
+def allowlist_target_errors(allowlist: list[str] | tuple[str, ...], targets: tuple[str, ...],
+                            kit_root: Path) -> list[str]:
+    """Bash rules that name no target, when the kit itself is not a target.
+
+    Background sessions start in kit_root and `dontAsk` denies `cd` and
+    chaining, so a rule like `git status --short` would inspect the kit
+    (F6 acceptance A6). A target counts only as a whole path.
+    """
+
+    roots = [t.rstrip("/") for t in targets]
+    if not roots or str(Path(kit_root)).rstrip("/") in roots:
+        return []
+    named = [re.compile(re.escape(root) + r"(?=$|[/\s\"')])") for root in roots]
+    errors = []
+    for entry in allowlist:
+        match = re.fullmatch(r"\s*Bash\((.*)\)\s*", entry, re.DOTALL)
+        if match and not any(p.search(match.group(1)) for p in named):
+            errors.append(
+                f"allowlist: {entry!r} names no target; sessions start in kit_root, so name the target in the "
+                f"command (e.g. `git -C {roots[0]} status --short`, "
+                f"`python3 -m unittest discover -s {roots[0]} -t {roots[0]}`)"
+            )
+    return errors
+
+
 def _target_errors(env: Envelope, doc: StateDoc) -> list[str]:
     errors = []
     if not env.targets:
@@ -281,6 +306,8 @@ def validate_envelope(env: Envelope, *, doc: StateDoc, kit_root: Path, task_dir:
         _check_forbidden_allowlist(list(env.allowlist))
     except LaunchRefused as exc:
         errors.append(f"allowlist: {exc}")
+    else:
+        errors += allowlist_target_errors(env.allowlist, env.targets, kit_root)
     if env.max_corrections not in (0, 1):
         errors.append(f"max_corrections must be 0 or 1, got {env.max_corrections}")
     if env.judge_max_calls < 0:
