@@ -32,7 +32,7 @@ def raw_envelope(**overrides) -> dict:
     raw = {
         "targets": [TARGET],
         "branches": {TARGET: "feat/x"},
-        "allowlist": ["Bash(mvn test)"],
+        "allowlist": [f"Bash(mvn -f {TARGET}/pom.xml test)"],
         "review": "each_stage",
         "max_corrections": 1,
         "max_duration": "8h",
@@ -210,6 +210,27 @@ class ValidateTests(unittest.TestCase):
                 self.assertEqual(len(errors), 1, errors)
                 self.assertIn(fragment, errors[0])
 
+    def test_allowlist_rules_must_name_a_target(self):
+        # F6 acceptance A6: background sessions start in kit_root, so a rule such
+        # as `git status --short` inspects the kit, never the target.
+        with tempfile.TemporaryDirectory() as tmp:
+            errors = self._errors(tmp, allowlist=["Bash(git status --short)", f"Bash(git -C {TARGET} diff *)"])
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("'Bash(git status --short)'", errors[0])
+        self.assertIn("kit_root", errors[0])
+
+    def test_target_named_only_as_a_whole_path(self):
+        errors = env_mod.allowlist_target_errors([f"Bash(git -C {TARGET}2 status --short)"], (TARGET,), KIT_ROOT)
+        self.assertEqual(len(errors), 1, errors)
+        for rule in (f"Bash(git -C {TARGET} status --short)", f"Bash(python3 -m unittest discover -s {TARGET}/tests *)",
+                     f"Bash(mvn -f {TARGET}/pom.xml test)"):
+            with self.subTest(rule=rule):
+                self.assertEqual(env_mod.allowlist_target_errors([rule], (TARGET,), KIT_ROOT), [])
+
+    def test_relative_rules_allowed_when_the_kit_is_a_target(self):
+        rules = ["Bash(git status --short)", "Bash(python3 -m unittest *)"]
+        self.assertEqual(env_mod.allowlist_target_errors(rules, (f"{KIT_ROOT}/",), KIT_ROOT), [])
+
     def test_limits_and_enums(self):
         for overrides in ({"max_corrections": 2}, {"max_corrections": -1}, {"judge_max_calls": -1},
                           {"max_duration": "1d"}, {"review": "never"}, {"on_pass_with_risks": "maybe"}):
@@ -325,10 +346,10 @@ class ApproveTests(unittest.TestCase):
 
     def test_summary_lists_every_field(self):
         with tempfile.TemporaryDirectory() as tmp:
-            fx = TaskFixture(tmp, envelope=raw_envelope(allowlist=["Bash(mvn test)", "Bash(mvn verify)"]))
+            fx = TaskFixture(tmp, envelope=raw_envelope(allowlist=[f"Bash(mvn -f {TARGET}/pom.xml test)", f"Bash(mvn -f {TARGET}/pom.xml verify)"]))
             _, out, _ = self._approve(fx, "no\n")
             for fragment in ("t1 — Demo task", f"1. java-backend — {HANDOFF}", "same allowlist", TARGET, "feat/x",
-                             "Bash(mvn test)", "Bash(mvn verify)", "each_stage", "max_corrections: 1", "8h",
+                             f"Bash(mvn -f {TARGET}/pom.xml test)", f"Bash(mvn -f {TARGET}/pom.xml verify)", "each_stage", "max_corrections: 1", "8h",
                              "judge_max_calls: 4", "on_pass_with_risks: judge", "sha256: ",
                              "Type the task slug (t1) to approve: "):
                 self.assertIn(fragment, out)

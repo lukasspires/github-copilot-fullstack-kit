@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime
 import sys
 import time
 from pathlib import Path
@@ -29,6 +30,7 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import common, status_claude
+from scripts import state as state_module
 
 REASON_STATE_CHANGED = "state_changed"
 REASON_WAITING_APPROVAL = "waiting_approval"
@@ -53,6 +55,19 @@ def _describe_filters(cwd: str | None, title_prefix: str | None, native_id: str 
     return f"cwd={cwd!r}, title_prefix={title_prefix!r}, id={native_id!r}, nn={nn!r}"
 
 
+def _within_launch_idle_grace(state_path: str, nn: int, classification: str, session: dict | None) -> bool:
+    """Whether a skipped `finished` write was the launch grace, not a no-op.
+
+    `record_observed_transition` only skips a legal `launched -> finished`
+    for an idle end of turn when `LAUNCH_IDLE_GRACE` has not elapsed.
+    """
+
+    if classification != "finished" or session is None or not status_claude.is_idle_end_of_turn(session):
+        return False
+    doc = state_module.read_state(state_path)
+    return state_module.get_assignment(doc, nn).state == "launched"
+
+
 @dataclasses.dataclass
 class WatchOutcome:
     reason: str
@@ -73,6 +88,7 @@ def run_watch(
     state_path: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    now: Callable[[], datetime.datetime] | None = None,
 ) -> WatchOutcome:
     """Poll `get_sessions()` every `interval` seconds, up to `max_duration`.
 
@@ -108,6 +124,12 @@ def run_watch(
     one point a *genuinely new*, non-`"unknown"` classification is
     observed. Not attempted for `waiting_approval`/timeout exits (out of
     this finding's scope) or for the inconclusive `"unknown"` polls above.
+
+    F3 (F6 review): when that write is skipped because the node is still
+    `launched` and its idle end of turn is inside `LAUNCH_IDLE_GRACE`, the
+    `finished` is not reported; polling continues until the write happens
+    or `max_duration`. `now` supplies the write's timestamp (wall clock by
+    default). Without `state_path`/`nn` nothing changes.
     """
 
     if interval <= 0:
@@ -141,14 +163,21 @@ def run_watch(
 
         if classification == "waiting_approval":
             return WatchOutcome(REASON_WAITING_APPROVAL, classification, session, elapsed)
+        # An idle end of turn inside LAUNCH_IDLE_GRACE is not recorded (F3),
+        # so it is not a change yet: keep `last` and poll again.
+        deferred = False
         if not transient_unknown and not first_pass and classification != last:
             if state_path is not None and nn is not None:
-                status_claude.record_observed_transition(state_path, nn, classification)
-            return WatchOutcome(REASON_STATE_CHANGED, classification, session, elapsed)
+                wrote = status_claude.record_observed_transition(
+                    state_path, nn, classification, at=now() if now else None, session=session
+                )
+                deferred = not wrote and _within_launch_idle_grace(state_path, nn, classification, session)
+            if not deferred:
+                return WatchOutcome(REASON_STATE_CHANGED, classification, session, elapsed)
         if elapsed >= max_duration:
             return WatchOutcome(REASON_TIMED_OUT, classification, session, elapsed)
 
-        if not transient_unknown:
+        if not transient_unknown and not deferred:
             last, first_pass = classification, False
         sleep(interval)
 

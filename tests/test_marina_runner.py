@@ -21,9 +21,9 @@ import unittest.mock
 from pathlib import Path
 
 import scripts.state as st
-from scripts import preflight
+from scripts import preflight, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import runner
+from scripts.marina import handoff_gen, runner
 from scripts.marina.judge import JudgeAnswer, JudgeFailed
 
 KIT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,7 +56,7 @@ class World:
         raw = {
             "targets": [str(self.target)],
             "branches": {str(self.target): "feat/x"},
-            "allowlist": ["Bash(true)"],
+            "allowlist": [f"Bash(test -d {self.target})"],
             "review": review,
             "max_corrections": max_corrections,
             "max_duration": "8h",
@@ -190,7 +190,7 @@ class ChainTests(unittest.TestCase):
             self.assertEqual([(a.edge, a.state) for a in doc.assignments], [("inicia", "accepted"), ("revisa", "accepted")])
             for a in doc.assignments:
                 self.assertEqual(a.events[0].by, "marina-run")
-                self.assertEqual(a.allowlist, ["Bash(true)"])
+                self.assertEqual(a.allowlist, [f"Bash(test -d {w.target})"])
             self.assertTrue((w.task_dir / "git-after-01.txt").exists())
             self.assertFalse((w.task_dir / "git-after-02.txt").exists())
             checkpoint = w.checkpoint()
@@ -198,6 +198,49 @@ class ChainTests(unittest.TestCase):
             self.assertIn("Motivo de parada: done.", checkpoint)
             self.assertIn("nn=01 node-backend inicia", checkpoint)
             self.assertFalse((w.task_dir / runner.LOCK_NAME).exists())
+
+    def test_turn_ended_as_working_idle_is_finished(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, verdicts={2: "PASS"})
+            original = w.sleep
+
+            def end_as_working_idle(seconds):
+                original(seconds)
+                for session in w.sessions.values():
+                    if session.get("state") == "done":
+                        session.update(state="working", status="idle")
+
+            w.sleep = end_as_working_idle
+            result = w.run(max_duration=300)
+            self.assertEqual((result.outcome, result.created), ("done", [1, 2]))
+
+    def test_idle_right_after_launch_is_not_finished(self):
+        # F6 acceptance A3: a session listed as working/idle 0.3 s after launch
+        # was recorded as finished and stopped the chain with receipt_missing.
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, verdicts={2: "PASS"})
+            w.initial_session = {"state": "working", "status": "idle"}
+            original = w.sleep
+
+            def start_then_finish(seconds):
+                for session in w.sessions.values():
+                    if session.get("status") == "idle" and session.get("state") == "working":
+                        session.update(status="busy")
+                original(seconds)
+
+            w.sleep = start_then_finish
+            result = w.run(max_duration=300)
+            self.assertEqual((result.outcome, result.created), ("done", [1, 2]))
+
+    def test_session_idle_since_launch_stops_after_grace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            w.initial_session = {"state": "blocked", "status": "idle"}
+            w.auto_finish = False
+            result = w.run(max_duration=3600)
+            self.assertEqual((result.outcome, result.reason), ("stop", "receipt_missing"))
+            self.assertGreaterEqual(w.clock, status_claude.LAUNCH_IDLE_GRACE.total_seconds())
+            self.assertLess(w.clock, 3600)
 
     def test_children_stdin_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -296,7 +339,7 @@ class SafetyTests(unittest.TestCase):
             w = World(tmp)
             doc = w.doc()
             st.add_assignment(doc, role=ROLE, type_="implementação", edge="inicia", predecessor=0,
-                              targets=[str(w.target)], allowlist=["Bash(true)"], by="marina-run", at=AT)
+                              targets=[str(w.target)], allowlist=[f"Bash(test -d {w.target})"], by="marina-run", at=AT)
             st.write_state(w.state_path, doc)
             result = w.run()
             self.assertEqual((result.outcome, result.reason, result.created), ("stop", "node_not_launched", []))
@@ -421,6 +464,77 @@ class SafetyTests(unittest.TestCase):
                 with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                     w.run(**kwargs)
             self.assertFalse((w.task_dir / runner.LOCK_NAME).exists())
+
+
+class ReplacementTests(unittest.TestCase):
+    """F6 A4 part 1: `marina run` resumes after Marina opens a `substitui` by hand."""
+
+    @staticmethod
+    def _lose_receipt(w: World, nn: int) -> None:
+        w.after_receipt[nn] = lambda: (w.kit / w.doc().get_assignment(nn).receipt).unlink()
+
+    @staticmethod
+    def _replace(w: World, nn: int, *, verdict: str = "") -> int:
+        """Marina opens and launches a `substitui` by hand; the run observes it from `launched`."""
+
+        doc = w.doc()
+        original = doc.get_assignment(nn)
+        at = AT + datetime.timedelta(seconds=w.clock)
+        a = st.add_assignment(doc, role=original.role, type_=original.type, edge="substitui", predecessor=nn,
+                              targets=original.targets, allowlist=original.allowlist, by="marina", at=at)
+        for to in ("prepared", "launched"):
+            st.set_state(doc, a.nn, to, by="marina", at=at)
+        a.native.id = f"{a.nn:08x}"
+        st.write_state(w.state_path, doc)
+        if a.role == "reviewer":
+            writer_text = (w.kit / st.reviewed_writer(doc, a).handoff).read_text(encoding="utf-8")
+            text = handoff_gen.render_review_handoff(doc, a, kit_root=w.kit, writer_handoff_text=writer_text)
+        else:
+            template = (w.task_dir / "stage-1-handoff-template.md").read_text(encoding="utf-8")
+            text = handoff_gen.render_stage_handoff(doc, a, kit_root=w.kit, template_text=template)
+        (w.kit / a.handoff).write_text(text, encoding="utf-8")
+        w.sessions[a.native.id] = {"id": a.native.id, "name": a.title, "cwd": str(w.kit), "kind": "background",
+                                   "state": "working", "status": "busy"}
+        if verdict:
+            w.verdicts[a.nn] = verdict
+        return a.nn
+
+    def test_replaced_reviewer_is_judged_against_the_reviewed_writer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, verdicts={5: "PASS"})
+            self._lose_receipt(w, 2)
+            first = w.run()
+            self.assertEqual((first.outcome, first.reason, first.created), ("stop", "receipt_missing", [1, 2]))
+            self.assertEqual(self._replace(w, 2, verdict="PASS_WITH_RISKS"), 3)
+            second = w.run()
+            self.assertEqual((second.outcome, second.created), ("done", [4, 5]))
+            question, paths = w.judge_calls[0]
+            self.assertEqual(question.nn, 3)
+            self.assertIn(str(w.task_dir / f"01-{ROLE}-receipt.md"), paths)
+            self.assertNotIn(str(w.task_dir / "02-reviewer-receipt.md"), paths)
+            self.assertEqual(w.doc().get_assignment(4).predecessor, 1)
+
+    def test_replaced_writer_is_the_stage_writer_for_the_git_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, verdicts={3: "PASS", 5: "PASS"})
+            self._lose_receipt(w, 1)
+            first = w.run()
+            self.assertEqual((first.outcome, first.reason, first.created), ("stop", "receipt_missing", [1]))
+            self.assertEqual(self._replace(w, 1), 2)
+            second = w.run()
+            self.assertEqual((second.outcome, second.created), ("done", [3, 4, 5]))
+            self.assertTrue((w.task_dir / "git-after-02.txt").exists())
+            self.assertEqual([w.doc().get_assignment(n).predecessor for n in (3, 4)], [2, 2])
+
+    def test_foreign_change_after_a_replaced_writer_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, verdicts={3: "PASS"})
+            self._lose_receipt(w, 1)
+            w.run()
+            self._replace(w, 1)
+            w.after_receipt[3] = lambda: setattr(w, "snapshot", "dirty\n")
+            result = w.run()
+            self.assertEqual((result.outcome, result.reason, result.created), ("stop", "foreign_change", [3]))
 
 
 class PreviewTests(unittest.TestCase):

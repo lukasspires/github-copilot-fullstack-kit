@@ -110,7 +110,7 @@ at     = 2026-10-25T21:00:00-03:00
 sha256 = "<sha256 do envelope sem approval + conteúdo dos handoffs citados>"
 ```
 
-**Expansão em grafo.** O estágio 1 é `inicia`; cada estágio seguinte é `prossegue`. `review = "each_stage"` insere `revisa` após cada estágio; `"final"` insere um único `revisa` após o último. Um `FAIL` produz `corrige` com o papel do writer revisado, até `max_corrections` por estágio, seguido de novo `revisa`. Com `review = "final"`, a correção conta na cota do último estágio. O runner nunca cria papel, aresta (`analisa`, `continua`, `substitui`, `revisa_direta`) ou alvo fora dessa expansão.
+**Expansão em grafo.** O estágio 1 é `inicia`; cada estágio seguinte é `prossegue`. `review = "each_stage"` insere `revisa` após cada estágio; `"final"` insere um único `revisa` após o último. Um `FAIL` produz `corrige` com o papel do writer revisado, até `max_corrections` por estágio, seguido de novo `revisa`. Com `review = "final"`, a correção conta na cota do último estágio. O runner nunca cria papel, aresta (`analisa`, `continua`, `substitui`, `revisa_direta`) ou alvo fora dessa expansão. O grafo aceita um `substitui` aberto pela Marina (F6, achado A4, Parte 1): ele substitui um nó da expansão em `receipt_missing`/`receipt_invalid` que não seja outro `substitui`, com o mesmo papel, tipo, alvos e allowlist do envelope, no máximo uma vez por nó, e vale como o nó substituído (estágio, aresta efetiva, predecessor dos próximos nós); um nó que aponte para o nó substituído, e não para o substituto, fica fora da expansão. `preparation_failed` e `abandoned` continuam fora.
 
 **Predecessores, conforme G3.** `revisa` tem como predecessor o último writer `accepted` do estágio (o writer original ou o último `corrige`). `corrige` tem como predecessor o reviewer `accepted` com `verdict = FAIL`. `prossegue` tem como predecessor o writer que abriu o estágio anterior (`inicia` ou `prossegue`), porque o G3 exige do `prossegue` o mesmo papel e o mesmo tipo do predecessor, e um `corrige` tem tipo `correção`; pelo mesmo motivo, todos os estágios usam o mesmo papel. Ele só é aberto depois que a revisão desse estágio terminou em `PASS` (ou `PASS_WITH_RISKS` aceito); com `review = "final"`, logo após o writer ser aceito.
 
@@ -137,8 +137,8 @@ Cada iteração de `marina run <projeto> <tarefa> --interval <s> --max-duration 
 | `launched`, `working` | `wait` |
 | `waiting_approval` | executa `--notify-cmd` (se informado) uma vez por entrada nesse estado; `wait`. Nunca responde à aprovação |
 | `uncertain` | reconcilia pelo manager (título, cwd, horário, ID). Encontrou → `launched`. Ausência confirmada → `abandoned` e `stop` |
-| `finished` sem receipt | `receipt_missing` e `stop` |
-| `receipt_received` | `receipt_lint`: PASS → `receipt_validated`; FAIL → `receipt_invalid` e `stop` |
+| `finished` sem receipt | `receipt_missing` e `stop`; a Marina pode abrir e lançar o `substitui` e retomar com `marina run` enquanto ele roda (o runner valida o receipt e grava o veredito) |
+| `receipt_received` | `receipt_lint`: PASS → `receipt_validated`; FAIL → `receipt_invalid` e `stop` (mesma retomada por `substitui`) |
 | writer validado, `status: done` | `accepted`; próximo: `revisa` (each_stage) ou `prossegue`/`revisa` final |
 | writer validado, `pending`/`needs_input`/`blocked` | `closed_*` correspondente e `stop` |
 | reviewer `PASS` | `accepted`; próximo estágio ou fim `done` |
@@ -148,7 +148,7 @@ Cada iteração de `marina run <projeto> <tarefa> --interval <s> --max-duration 
 
 **Faixa cinzenta.** `gate.risks_overlap_substantially` passa a expor a razão de sobreposição. Acima do limiar atual → sem progresso (`stop`); abaixo de um limiar inferior novo → progresso (`corrige`); entre os dois → `ask_judge`. O limiar inferior é uma constante em `gate.py` com teste. Com `max_corrections ∈ {0, 1}` a faixa não é alcançável pelo runner: dois FAIL consecutivos só acontecem no segundo FAIL, que sempre para. Por isso, na v1, a faixa aparece só nas razões de `P_progresso` do `gate`, para a Marina interativa, e `decide` não a consulta (plano F3, decisão 1).
 
-**Segundo FAIL consecutivo.** Sempre `stop`, independentemente da juíza: continua exigindo decisão humana registrada no journal. Por isso `max_corrections` aceita só 0 ou 1 no schema v1; a aprovação do envelope não conta como essa decisão antecipada. Aceitar mais correções automáticas exige mudar essa regra explicitamente, fora deste plano.
+**Segundo FAIL consecutivo.** Sempre `stop`, independentemente da juíza: continua exigindo decisão humana registrada no journal. Por isso `max_corrections` aceita só 0 ou 1 no schema v1; a aprovação do envelope não conta como essa decisão antecipada. Aceitar mais correções automáticas exige mudar essa regra explicitamente, fora deste plano. A cadeia de FAIL atravessa `substitui`: um reviewer ou `corrige` substituído conta como o nó original, e um `corrige` substituído conta uma vez na cota.
 
 **Abertura de nó.** `state add` (by `marina-run`) → `handoff_gen` → `preflight` → `gate` → `launch_claude`. Na F4 o `gate` roda antes do `state add`, porque avalia um nó proposto que ainda não existe; os handoffs dos estágios do envelope são templates com nome não canônico, e o handoff de cada nó é gerado; as chamadas da juíza ficam em `judge-calls.jsonl`, que conta a cota entre reinícios (plano F4, decisões 1, 2 e 5). Uma falha em qualquer passo registra o terminal correspondente (`preparation_failed`, `uncertain`) e para.
 
@@ -219,7 +219,7 @@ Cada fase é uma atribuição própria ao `kit-tooling` (código em `scripts/`/`
 | F3 | `envelope.py`, schema v1, `marina approve`, `decide.py`, faixa cinzenta no `gate` | F0 |
 | F4 | `handoff_gen.py`, `judge.py` com perfil `marina-judge`, `runner.py`, `marina run/status/stop`; **no mesmo bloco**, a reescrita da regra em `AGENTS.md` e `docs/agent-workflow.md`: "opening the next node is never automatic outside a human-approved envelope (`marina approve`)", e a exceção da juíza à regra "never delegate to another coordinator" (juíza só leitura, decide entre opções dadas). **Executada em 2026-10** — ver [plano-f4-runner-e-juiza-2026-10.md](plano-f4-runner-e-juiza-2026-10.md) | F1, F3 |
 | F5 | `mcp_server.py`, `.mcp.json`, `tools` do perfil `marina.md`, ajuste da skill `task-execution`. **Executada em 2026-10** — ver [plano-f5-servidor-mcp-2026-10.md](plano-f5-servidor-mcp-2026-10.md) | F4 |
-| F6 | README, `agent-workflow.md`, tabela de ferramentas; aceitação real (3.7) | F2, F5 |
+| F6 | README, `agent-workflow.md`, tabela de ferramentas; aceitação real (3.7). Executada em 2026-10-27 — ver [plano-f6-docs-e-aceitacao-real-2026-10.md](plano-f6-docs-e-aceitacao-real-2026-10.md); a matriz de evidências fica no checkpoint local da tarefa `f6-docs-aceitacao`. Pendentes ao vivo: cadeia com `corrige`, gate de Git entre dois writers, `needs_input` e lançamento incerto; retomada após `receipt_missing`/`receipt_invalid` por `substitui` aberto pela Marina implementada (A4, Parte 1, nn=07); o runner abrir o `substitui` sozinho (Parte 2) ficou fora por decisão do usuário | F2, F5 |
 
 ## 5. Riscos residuais
 

@@ -75,6 +75,18 @@ class ClassifySessionTests(unittest.TestCase):
     def test_blocked_idle_missing_waiting_for_key_is_finished(self):
         self.assertEqual(status_claude.classify_session(_session(state="blocked", status="idle")), "finished")
 
+    def test_working_idle_without_waiting_for_is_finished(self):
+        # CLI 2.1.306 left a --bg session that had ended its turn in this state for
+        # minutes (F6 acceptance, session d52d4a87); without this the run waited forever.
+        self.assertEqual(
+            status_claude.classify_session(_session(state="working", status="idle", waitingFor=None)), "finished"
+        )
+        self.assertEqual(status_claude.classify_session(_session(state="working", status="idle")), "finished")
+
+    def test_working_busy_and_working_without_status_stay_working(self):
+        self.assertEqual(status_claude.classify_session(_session(state="working", status="busy")), "working")
+        self.assertEqual(status_claude.classify_session(_session(state="working")), "working")
+
     def test_blocked_busy_stays_unknown(self):
         self.assertEqual(status_claude.classify_session(_session(state="blocked", status="busy")), "unknown")
 
@@ -254,6 +266,33 @@ class RecordObservedTransitionTests(unittest.TestCase):
         self.assertEqual(a.events[-1].by, "status")
         self.assertEqual(a.native.last_seen, "working")
         self.assertEqual(a.native.last_seen_at, AT)
+
+    def test_idle_right_after_launch_waits_for_the_grace(self):
+        # F6 acceptance A3: idle 0.3 s after launch is not an end of turn yet.
+        _write_scratch_state(self.state_path, assignment_state="launched")
+        idle = _session(state="working", status="idle")
+        early = AT + datetime.timedelta(seconds=1)
+        self.assertFalse(status_claude.record_observed_transition(self.state_path, 1, "finished", at=early, session=idle))
+        self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "launched")
+        late = AT + status_claude.LAUNCH_IDLE_GRACE
+        self.assertTrue(status_claude.record_observed_transition(self.state_path, 1, "finished", at=late, session=idle))
+        self.assertEqual(st.read_state(self.state_path).get_assignment(1).state, "finished")
+
+    def test_terminal_manager_state_right_after_launch_is_finished(self):
+        _write_scratch_state(self.state_path, assignment_state="launched")
+        early = AT + datetime.timedelta(seconds=1)
+        wrote = status_claude.record_observed_transition(
+            self.state_path, 1, "finished", at=early, session=_session(state="done")
+        )
+        self.assertTrue(wrote)
+
+    def test_idle_after_working_is_finished_without_grace(self):
+        _write_scratch_state(self.state_path, assignment_state="working")
+        early = AT + datetime.timedelta(seconds=1)
+        wrote = status_claude.record_observed_transition(
+            self.state_path, 1, "finished", at=early, session=_session(state="blocked", status="idle")
+        )
+        self.assertTrue(wrote)
 
     def test_waiting_approval_and_finished_are_also_recordable(self):
         _write_scratch_state(self.state_path, assignment_state="working")

@@ -5,8 +5,8 @@ transition, never answers a prompt: when `waitingFor: permission prompt`,
 prints the literal instruction `claude attach <id>` and stops.
 
 Minimum tested Claude CLI version: 2.1.306 — `cwd` confirmed present on
-every listed session (background and interactive), and the dontAsk
-end-of-turn `blocked`/`idle` state observed, on this version; see
+every listed session (background and interactive), and the end-of-turn
+`blocked`/`idle` and `working`/`idle` states observed, on this version; see
 docs/agent-workflow.md's "Claude Code" section. Filters by `cwd` and/or
 title prefix, per the handoff (not title prefix alone).
 
@@ -37,6 +37,13 @@ ATTACH_INSTRUCTION = "claude attach {id}"
 
 FINISHED_STATES = frozenset({"done", "stopped", "failed"})
 
+# A session listed idle right after launch has not necessarily started its
+# turn (F6 acceptance A3: idle 0.3 s after launch, before any output). While
+# an assignment is still `launched`, an idle end of turn becomes `finished`
+# only after this grace, counted from the `launched` event; a session that
+# really ended at once (e.g. a usage limit) still reaches receipt_missing.
+LAUNCH_IDLE_GRACE = datetime.timedelta(seconds=60)
+
 # Finding 2 (tooling-gaps-fix): classifications that map to a recordable G2
 # target state. "unknown" (and a `None` classification, no matching
 # session) are deliberately absent — never written (Finding 3's guard
@@ -55,6 +62,7 @@ def record_observed_transition(
     classification: str | None,
     *,
     at: datetime.datetime | None = None,
+    session: dict | None = None,
 ) -> bool:
     """Persist one observed G2 transition into `state.toml` (Finding 2).
 
@@ -70,7 +78,9 @@ def record_observed_transition(
     of raising or corrupting `state.toml` (a defensive guard, not expected
     to trigger in normal use — e.g. `launch-claude` was never run so the
     assignment is still `prepared`, but the manager reports `working` for
-    an unrelated reason).
+    an unrelated reason); or `session` shows an idle end of turn while the
+    assignment is still `launched` and `LAUNCH_IDLE_GRACE` has not elapsed
+    since the `launched` event.
     """
 
     target = G2_TARGET_BY_CLASSIFICATION.get(classification)
@@ -92,12 +102,33 @@ def record_observed_transition(
         return False
 
     at = at or datetime.datetime.now().astimezone()
+    if target == "finished" and assignment.state == "launched" and session is not None and is_idle_end_of_turn(session):
+        launched_at = next((e.at for e in reversed(assignment.events) if e.to == "launched"), None)
+        if launched_at is not None and at - launched_at < LAUNCH_IDLE_GRACE:
+            return False
+
     assignment.native.last_seen = classification
     assignment.native.last_seen_at = at
     state_module.append_event(assignment, target, by="status", at=at)
     doc.task.updated_at = at
     state_module.write_state(state_path, doc)
     return True
+
+
+def is_idle_end_of_turn(session: dict) -> bool:
+    """`blocked` or `working` with `status: idle` and no waitingFor.
+
+    A background session that ended its turn can stay `blocked` (dontAsk after
+    denials; docs/achados-f1-spike-hooks-e-juiza-2026-10.md, Q2) or `working`
+    (seen for minutes in the F6 acceptance run) like this. The receipt, not
+    this classification, establishes acceptance.
+    """
+
+    return (
+        session.get("state") in ("blocked", "working")
+        and session.get("status") == "idle"
+        and not session.get("waitingFor")
+    )
 
 
 def classify_session(session: dict) -> str:
@@ -112,9 +143,7 @@ def classify_session(session: dict) -> str:
     if session.get("status") == "waiting" and session.get("waitingFor") == "permission prompt":
         return "waiting_approval"
     state = session.get("state")
-    # dontAsk background sessions end their turn as blocked/idle with no
-    # waitingFor after denials (docs/achados-f1-spike-hooks-e-juiza-2026-10.md, Q2).
-    if state == "blocked" and session.get("status") == "idle" and not session.get("waitingFor"):
+    if is_idle_end_of_turn(session):
         return "finished"
     if state == "working":
         return "working"

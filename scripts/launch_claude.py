@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime
 import json
 import os
 import re
@@ -293,6 +294,7 @@ def run_launch(
     read_text: Callable[[Path], str] = lambda p: p.read_text(encoding="utf-8"),
     extra_args: list[str] | None = None,
     timeout: int = 30,
+    now: Callable[[], datetime.datetime] = lambda: datetime.datetime.now().astimezone(),
 ) -> LaunchResult:
     """Run `preflight` (fail-fast), then build+launch at most one session.
 
@@ -361,7 +363,7 @@ def run_launch(
         sync_note = f"; synchronized: {', '.join(sync_fields)}" if sync_fields else ""
         append_event(
             assignment, "launched", by="launch-claude",
-            note=f"id={session_id}; write_rules={write_rule_count}{sync_note}",
+            note=f"id={session_id}; write_rules={write_rule_count}{sync_note}", at=now(),
         )
         assignment.native.platform = "claude"
         assignment.native.id = session_id

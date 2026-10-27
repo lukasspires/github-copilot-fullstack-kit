@@ -30,7 +30,7 @@ from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import common, handoff_sync
+from scripts import common, handoff_sync, status_claude
 from scripts.state import append_event, read_state, write_state
 from scripts.state.model import Assignment, StateDoc, StateError
 
@@ -178,7 +178,8 @@ def run_preflight(
         prefix = f"{doc.task.slug} —"
         for session in sessions:
             common.validate_manager_session_schema(session)
-            if session.get("name", "").startswith(prefix) and session.get("state") == "working":
+            # classify_session, not `state` alone: a finished --bg session can stay `working`/`idle`.
+            if session.get("name", "").startswith(prefix) and status_claude.classify_session(session) == "working":
                 reasons.append(f"a native session for this task is already working: {session.get('name')}")
 
     ok = not reasons

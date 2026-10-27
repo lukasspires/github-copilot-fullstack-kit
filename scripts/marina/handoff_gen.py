@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 from scripts.handoff_sync import _section
-from scripts.state import Assignment, StateDoc
+from scripts.state import Assignment, StateDoc, reviewed_writer
 
 TEMPLATE_REQUIRED = ("Objective", "Write scope", "Acceptance criteria")
 TEMPLATE_OPTIONAL = ("Target instructions to read explicitly", "Checks and workdir", "Preservation")
@@ -28,6 +28,10 @@ _DEFAULT_PRESERVATION = (
     "Other sessions may be working; preserve their changes. Do not run `git add`, `commit`, `checkout`, "
     "`reset` or `stash`. Commands outside the granted allowlist are denied: record each one in the receipt "
     "as a skipped check with the reason, and use `needs_input` or `blocked` if acceptance depends on it."
+)
+_CWD_NOTE = (
+    "This session starts in kit_root (`{kit_root}`), not in a target. Run each check exactly as the granted "
+    "allowlist writes it, with the target path it names; `cd` and chained commands are denied."
 )
 _CLOSING = (
     "Never continue, fork, or resume this assignment into a new coordination session. "
@@ -71,6 +75,8 @@ def _render(
     checks: str = "",
     preservation: str = "",
 ) -> str:
+    cwd_note = _CWD_NOTE.format(kit_root=kit_root)
+    checks = checks.replace(cwd_note, "").strip()
     roots = [f"- **kit_root:** `{kit_root}`"] + [f"- **target_root:** `{t}`" for t in a.targets]
     metadata = [
         f"- **Task:** {doc.task.slug} (project: {doc.task.project})",
@@ -91,7 +97,7 @@ def _render(
         f"## Context\n\n{context}",
         f"## Write scope\n\n{write_scope}",
         f"## Acceptance criteria\n\n{acceptance}",
-        f"## Checks and workdir\n\n{checks or 'Run the granted allowlist commands from each target root.'}",
+        f"## Checks and workdir\n\n{cwd_note}\n\n{checks or 'Run the granted allowlist commands.'}",
         f"## Preservation\n\n{preservation or _DEFAULT_PRESERVATION}",
         "## Assignment metadata\n\n" + "\n".join(metadata) + f"\n\n{_CLOSING}",
     ]
@@ -121,15 +127,17 @@ def render_stage_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, templa
 
 
 def render_review_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, writer_handoff_text: str) -> str:
-    """Handoff for a `revisa` reviewer of the writer `a.predecessor`."""
+    """Handoff for a `revisa` reviewer (or its `substitui`) of the writer it reviews."""
 
-    writer = doc.get_assignment(a.predecessor)
+    writer = reviewed_writer(doc, a)
     task_dir = kit_root / Path(doc.task.journal).parent
     context = "\n".join([
         f"- Writer handoff: `{kit_root / writer.handoff}`",
         f"- Writer receipt: `{kit_root / writer.receipt}`",
         f"- Target state before the writer: `{task_dir / f'git-before-{writer.nn:02d}.txt'}`; "
         "review the targets' current diff against it.",
+        f"- Target state after the writer: `{task_dir / f'git-after-{writer.nn:02d}.txt'}`; its `# untracked sha256` "
+        "lines must match the ones in the state before for every untracked file the writer had to preserve.",
     ])
     acceptance = (
         f"{_body(writer_handoff_text, 'Acceptance criteria')}\n\n"
@@ -137,7 +145,10 @@ def render_review_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, write
     )
     return _render(
         doc, a, kit_root=kit_root,
-        objective=f"Revisão independente do nn={writer.nn:02d} ({writer.role}, {writer.edge}).",
+        objective=(
+            f"Revisão independente do nn={writer.nn:02d} ({writer.role}, {writer.edge}). Objetivo do writer:\n\n"
+            f"{_body(writer_handoff_text, 'Objective')}"
+        ),
         context=context,
         write_scope="None. Read-only review; write only the receipt below.",
         acceptance=acceptance,
@@ -150,7 +161,7 @@ def render_correction_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, t
     """Handoff for a `corrige` writer answering the FAIL review `a.predecessor`."""
 
     reviewer = doc.get_assignment(a.predecessor)
-    writer = doc.get_assignment(reviewer.predecessor)
+    writer = reviewed_writer(doc, reviewer)
     context = "\n".join([
         f"- FAIL review receipt: `{kit_root / reviewer.receipt}`",
         f"- Reviewed writer handoff: `{kit_root / writer.handoff}`",

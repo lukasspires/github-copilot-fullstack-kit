@@ -44,7 +44,7 @@ def _fake_kit(tmp: str) -> Path:
     doc.envelope = {
         "targets": ["/abs/api"],
         "branches": {"/abs/api": "feat/x"},
-        "allowlist": ["Bash(mvn test)"],
+        "allowlist": ["Bash(mvn -f /abs/api/pom.xml test)"],
         "review": "each_stage",
         "max_corrections": 1,
         "max_duration": "8h",

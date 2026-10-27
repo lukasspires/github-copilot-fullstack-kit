@@ -51,7 +51,9 @@ from scripts import common, gate, handoff_sync, launch_claude, preflight, receip
 from scripts.marina import envelope as env_mod
 from scripts.marina import handoff_gen, judge
 from scripts.marina.decide import Decision, NodeSpec, Observations, Question, decide
-from scripts.state import Assignment, StateDoc, add_assignment, append_event, read_state, write_state
+from scripts.state import (
+    Assignment, StateDoc, add_assignment, append_event, effective_edge, read_state, reviewed_writer, write_state,
+)
 from scripts.state.model import mode_for_role
 
 LOCK_NAME = ".marina-run.lock"
@@ -281,7 +283,8 @@ class _Run:
             matches = status_claude.find_task_sessions(sessions, native_id=current.native.id)
             if len(matches) == 1:
                 status_claude.record_observed_transition(
-                    str(self.state_path), current.nn, status_claude.classify_session(matches[0])
+                    str(self.state_path), current.nn, status_claude.classify_session(matches[0]),
+                    at=self.deps.now(), session=matches[0],
                 )
             return None
         if current.state == "uncertain":
@@ -371,7 +374,7 @@ class _Run:
 
     def _ask_judge(self, doc: StateDoc, env: env_mod.Envelope, obs: Observations, question: Question) -> Decision:
         reviewer = doc.get_assignment(question.nn)
-        writer = doc.get_assignment(reviewer.predecessor)
+        writer = reviewed_writer(doc, reviewer)
         paths = [str(self.kit_root / p) for p in (reviewer.receipt, reviewer.handoff, writer.receipt)]
         try:
             answer = self.deps.judge(question, paths)
@@ -387,7 +390,7 @@ class _Run:
         return decide(doc, env, follow)
 
     def _git_gate(self, doc: StateDoc, node: NodeSpec) -> str:
-        writers = [a for a in doc.assignments if a.edge in _WRITER_EDGES and a.state == "accepted"]
+        writers = [a for a in doc.assignments if effective_edge(doc, a) in _WRITER_EDGES and a.state == "accepted"]
         if not writers:
             return ""
         previous = max(writers, key=lambda a: a.nn)
@@ -434,7 +437,7 @@ class _Run:
         self.created.append(a.nn)
         launch = launch_claude.run_launch(
             self.state_path, a.nn, kit_root=self.kit_root,
-            run_preflight=self.deps.run_preflight, run_subprocess=self.deps.run_subprocess,
+            run_preflight=self.deps.run_preflight, run_subprocess=self.deps.run_subprocess, now=self.deps.now,
         )
         self.log(f"opened nn={a.nn:02d} {a.role} {a.edge}: " + (f"id={launch.session_id}" if launch.ok else
                                                               "; ".join(launch.reasons)[:300]))

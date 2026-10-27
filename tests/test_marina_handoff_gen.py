@@ -111,6 +111,17 @@ class RenderTests(unittest.TestCase):
                          "`GET /search` responde 200.", "Verdict", "None. Read-only review"):
             self.assertIn(fragment, text)
 
+    def test_review_handoff_carries_writer_objective_and_git_after(self):
+        # F6 acceptance A5/A7: criteria such as "the behaviors above" refer to the
+        # writer's objective, and untracked-file hashes are compared before/after.
+        writer_text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        text = handoff_gen.render_review_handoff(self.doc, reviewer, kit_root=KIT_ROOT, writer_handoff_text=writer_text)
+        objective = text.split("## Objective")[1].split("## Role and profile")[0]
+        self.assertIn("Implementar o endpoint de busca.", objective)
+        self.assertIn("git-after-01.txt", text)
+        self.assertIn("# untracked sha256", text)
+
     def test_correction_handoff_references_fail_receipt(self):
         reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
         fix = _add(self.doc, "java-backend", "correção", "corrige", reviewer.nn)
@@ -119,6 +130,39 @@ class RenderTests(unittest.TestCase):
         self.assertIn(str(KIT_ROOT / reviewer.receipt), text)
         self.assertIn(f"nn={reviewer.nn:02d}", text)
         self.assertIn("`src/main/java/`", text)
+
+    def test_correction_after_a_replaced_reviewer_names_the_reviewed_writer(self):
+        # F6 A4: the replacement's predecessor is the failed reviewer, not the writer.
+        failed = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        reviewer = _add(self.doc, "reviewer", "revisão", "substitui", failed.nn)
+        fix = _add(self.doc, "java-backend", "correção", "corrige", reviewer.nn)
+        text = handoff_gen.render_correction_handoff(self.doc, fix, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        self.assertIn(str(KIT_ROOT / reviewer.receipt), text)
+        self.assertIn(f"Reviewed writer handoff: `{KIT_ROOT / self.writer.handoff}`", text)
+        self.assertNotIn(str(KIT_ROOT / failed.handoff), text)
+
+    def test_replacement_reviewer_handoff_reviews_the_writer(self):
+        writer_text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        failed = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        reviewer = _add(self.doc, "reviewer", "revisão", "substitui", failed.nn)
+        text = handoff_gen.render_review_handoff(self.doc, reviewer, kit_root=KIT_ROOT, writer_handoff_text=writer_text)
+        self._valid(text, reviewer)
+        self.assertIn(f"Writer handoff: `{KIT_ROOT / self.writer.handoff}`", text)
+        self.assertIn("git-before-01.txt", text)
+
+    def test_checks_say_the_session_starts_in_kit_root(self):
+        # F6 acceptance A6: the specialist cannot `cd` into the target.
+        writer_text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        review_text = handoff_gen.render_review_handoff(self.doc, reviewer, kit_root=KIT_ROOT,
+                                                        writer_handoff_text=writer_text)
+        bare = TEMPLATE.split("## Checks and workdir")[0]
+        bare_text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=bare)
+        for text in (writer_text, review_text, bare_text):
+            checks = text.split("## Checks and workdir")[1].split("## Preservation")[0]
+            self.assertIn(f"starts in kit_root (`{KIT_ROOT}`)", checks)
+            self.assertNotIn("from each target root", checks)
+        self.assertEqual(review_text.count("starts in kit_root"), 1)
 
     def test_metadata_mirrors_assignment(self):
         text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)

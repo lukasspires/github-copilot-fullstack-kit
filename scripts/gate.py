@@ -40,8 +40,10 @@ from typing import Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts import common
-from scripts.state import Assignment, Event, NativeMeta, StateDoc, StateError, read_state
+from scripts import common, status_claude
+from scripts.state import (
+    Assignment, Event, NativeMeta, StateDoc, StateError, read_state, replaced_node, reviewed_writer,
+)
 from scripts.state.model import (
     ACTIVE_WRITER_STATES,
     ASSIGNMENT_TYPES,
@@ -234,7 +236,9 @@ def find_fail_review_chain(doc: StateDoc, reviewer_nn: int) -> list[Assignment]:
     first (`chain[0]` is `reviewer_nn` itself), stopping as soon as the
     predecessor writer's own `edge` is not `corrige` (i.e. the chain's
     first round). Empty if `reviewer_nn` is not itself an `accepted`
-    `reviewer` node with `verdict == "FAIL"`.
+    `reviewer` node with `verdict == "FAIL"`. A `substitui` node is walked
+    as the node it replaces, so a replaced reviewer or `corrige` does not
+    break the chain.
     """
 
     chain: list[Assignment] = []
@@ -245,12 +249,13 @@ def find_fail_review_chain(doc: StateDoc, reviewer_nn: int) -> list[Assignment]:
         and current.receipt_summary.verdict == "FAIL"
     ):
         chain.append(current)
-        if current.predecessor == 0:
+        if replaced_node(doc, current).predecessor == 0:
             break
-        writer = doc.get_assignment(current.predecessor)
-        if writer.edge != "corrige" or writer.predecessor == 0:
+        writer = reviewed_writer(doc, current)
+        original = replaced_node(doc, writer)
+        if original.edge != "corrige" or original.predecessor == 0:
             break
-        current = doc.get_assignment(writer.predecessor)
+        current = doc.get_assignment(original.predecessor)
     return chain
 
 
@@ -348,7 +353,7 @@ def evaluate_gate(
             for session in sessions:
                 common.validate_manager_session_schema(session)
                 cwd = session.get("cwd")
-                if session.get("state") != "working" or cwd is None:
+                if status_claude.classify_session(session) != "working" or cwd is None:
                     continue
                 if cwd in targets and session.get("name") not in known_titles:
                     reasons.append(

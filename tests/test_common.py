@@ -8,6 +8,7 @@ real installed CLI.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -172,9 +173,28 @@ class GitStatusDiffTests(unittest.TestCase):
             return " foo.py | 2 +-\n"
 
         text = common.git_status_diff("/tmp/x", runner=fake_runner)
-        self.assertEqual(text, "# git status --short\n M foo.py\n\n# git diff --stat\n foo.py | 2 +-\n")
+        self.assertEqual(
+            text, "# git status --short\n M foo.py\n\n# git diff --stat\n foo.py | 2 +-\n# untracked sha256\n"
+        )
         self.assertEqual(calls[0][0], ("status", "--short"))
         self.assertEqual(calls[1][0], ("diff", "--stat"))
+
+    def test_untracked_files_are_hashed(self):
+        # F6 acceptance A7: a reviewer must be able to tell that a preexisting
+        # untracked file kept its content, which `status --short` cannot show.
+        def fake_runner(args, *, cwd, timeout):
+            if args[:2] == ["status", "--porcelain=v1"]:
+                return " M foo.py\0?? NOTES.md\0?? dir/a b.txt\0"
+            return " M foo.py\n?? NOTES.md\n" if args[0] == "status" else ""
+
+        def read_bytes(path):
+            if path.name == "a b.txt":
+                raise PermissionError("denied")
+            return b"notes"
+
+        text = common.git_status_diff("/repo", runner=fake_runner, read_bytes=read_bytes)
+        section = text.split("# untracked sha256\n")[1]
+        self.assertEqual(section, f"{hashlib.sha256(b'notes').hexdigest()}  NOTES.md\nunreadable  dir/a b.txt\n")
 
 
 class CliVersionHeaderTests(unittest.TestCase):
