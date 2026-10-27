@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "marina": {
+      "command": "python3",
+      "args": [
+        "-m",
+        "scripts.marina",
+        "mcp"
+      ]
+    }
+  }
+}

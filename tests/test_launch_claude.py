@@ -66,6 +66,7 @@ EXPECTED_DOC_ARGV = [
     "--settings",
     '{"worktree":{"bgIsolation":"none"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"python3 /absolute/kit/scripts/marina/__main__.py hook require-receipt --receipt /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md --handoff /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md"}]}]}}',
     "--permission-mode", "dontAsk",
+    "--strict-mcp-config",
     "--allowedTools",
     "Edit(//absolute/api/**)",
     "Edit(//absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md)",

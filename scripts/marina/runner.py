@@ -482,6 +482,42 @@ class _Run:
         return decision
 
 
+def preview_decision(state_path: Path, *, kit_root: Path, deps: RunnerDeps) -> Decision:
+    """The decision `marina run` would take now, without any side effect.
+
+    Same observations as the loop, except that the manager is not observed
+    (no `record_observed_transition`, so an `uncertain` node shows `wait`),
+    no `git-after` is written and the judge is never called: an `ask_judge`
+    is returned as is (F5 plan, decision 3).
+    """
+
+    state_path = Path(state_path)
+    doc = read_state(state_path)
+    try:
+        env = env_mod.envelope_from_doc(doc)
+    except env_mod.EnvelopeError:
+        return Decision("stop", reason="envelope_invalid")
+    preview = _Run(state_path, Path(kit_root), 1.0, None, deps)
+    return decide(doc, env, preview._observations(doc, env, None))
+
+
+def decision_to_dict(decision: Decision) -> dict:
+    """JSON-serializable view of a `Decision` (for `marina mcp`)."""
+
+    return {
+        "kind": decision.kind,
+        "nn": decision.nn,
+        "to": decision.to,
+        "reason": decision.reason,
+        "notify": decision.notify,
+        "node": dataclasses.asdict(decision.node) if decision.node is not None else None,
+        "question": (
+            {"kind": decision.question.kind, "nn": decision.question.nn, "options": list(decision.question.options)}
+            if decision.question is not None else None
+        ),
+    }
+
+
 def _append_checkpoint(run: _Run, doc: StateDoc, *, started: datetime.datetime, interval: float,
                        effective: float, final: Decision) -> None:
     journal = run.kit_root / doc.task.journal

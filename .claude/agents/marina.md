@@ -1,7 +1,7 @@
 ---
 name: marina
 description: Main-session coordinator for intake, risk-based routing, sequential delegation, and evidence-backed delivery.
-tools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write", "Agent(Explore)", "TodoWrite"]
+tools: ["Read", "Glob", "Grep", "Bash", "Edit", "Write", "Agent(Explore)", "TodoWrite", "mcp__marina__task_status", "mcp__marina__envelope_show", "mcp__marina__sessions", "mcp__marina__next_nn", "mcp__marina__gate_check", "mcp__marina__decision_preview", "mcp__marina__handoff_validate", "mcp__marina__envelope_draft", "mcp__marina__state_reserve", "mcp__marina__launch_node", "mcp__marina__run_start", "mcp__marina__run_stop"]
 model: inherit
 permissionMode: default
 ---

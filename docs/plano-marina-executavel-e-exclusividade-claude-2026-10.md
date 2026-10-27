@@ -173,7 +173,7 @@ Registro em `.mcp.json` na raiz do kit: `python3 -m scripts.marina mcp`. Servido
 | `launch_node` | ação | lançamento avulso de um nó `prepared` fora do envelope; sem pré-aprovação no perfil |
 | `run_start`, `run_stop` | ação | inicia `marina run` destacado (log em `tasks/<t>/marina-run.log`) ou sinaliza parada; `run_start` recusa sem aprovação válida |
 
-Não existe ferramenta de aprovação. O perfil `marina.md` recebe as ferramentas de leitura `mcp__marina__*` em `tools`; as de escrita e ação ficam sujeitas ao prompt de permissão normal.
+Não existe ferramenta de aprovação. O perfil `marina.md` recebe as ferramentas de leitura `mcp__marina__*` em `tools`; as de escrita e ação ficam sujeitas ao prompt de permissão normal. Na F5, como uma lista `tools` torna indisponível o que não lista, o perfil lista as 12 ferramentas e a pré-aprovação das sete de leitura fica em `permissions.allow` do `.claude/settings.json` do kit; o `.mcp.json` usa `python3 -m scripts.marina mcp`, o que supõe o servidor iniciado com cwd na raiz do kit (confirmação na aceitação da F6; plano F5, decisões 1 e 2).
 
 ### 3.5 Hooks por invocação
 
@@ -218,7 +218,7 @@ Cada fase é uma atribuição própria ao `kit-tooling` (código em `scripts/`/`
 | F2 | `dontAsk` com regras de escrita derivadas, Stop hook `require-receipt`, `stdin=DEVNULL` e classificação de `blocked` em `launch_claude`/`status_claude`; alinhamento de `AGENTS.md`, `CLAUDE.md`, skill, `agent-workflow.md` e README (seção 3.5) | F1 e decisão de permissão (2026-10-25) |
 | F3 | `envelope.py`, schema v1, `marina approve`, `decide.py`, faixa cinzenta no `gate` | F0 |
 | F4 | `handoff_gen.py`, `judge.py` com perfil `marina-judge`, `runner.py`, `marina run/status/stop`; **no mesmo bloco**, a reescrita da regra em `AGENTS.md` e `docs/agent-workflow.md`: "opening the next node is never automatic outside a human-approved envelope (`marina approve`)", e a exceção da juíza à regra "never delegate to another coordinator" (juíza só leitura, decide entre opções dadas). **Executada em 2026-10** — ver [plano-f4-runner-e-juiza-2026-10.md](plano-f4-runner-e-juiza-2026-10.md) | F1, F3 |
-| F5 | `mcp_server.py`, `.mcp.json`, `tools` do perfil `marina.md`, ajuste da skill `task-execution` | F4 |
+| F5 | `mcp_server.py`, `.mcp.json`, `tools` do perfil `marina.md`, ajuste da skill `task-execution`. **Executada em 2026-10** — ver [plano-f5-servidor-mcp-2026-10.md](plano-f5-servidor-mcp-2026-10.md) | F4 |
 | F6 | README, `agent-workflow.md`, tabela de ferramentas; aceitação real (3.7) | F2, F5 |
 
 ## 5. Riscos residuais

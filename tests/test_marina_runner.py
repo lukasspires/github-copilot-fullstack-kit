@@ -423,6 +423,50 @@ class SafetyTests(unittest.TestCase):
             self.assertFalse((w.task_dir / runner.LOCK_NAME).exists())
 
 
+class PreviewTests(unittest.TestCase):
+    def _files(self, w: World) -> dict[str, bytes]:
+        return {p.name: p.read_bytes() for p in w.task_dir.iterdir()}
+
+    def test_preview_empty_graph_is_launch_stage_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            d = runner.preview_decision(w.state_path, kit_root=w.kit, deps=w.deps())
+            self.assertEqual((d.kind, d.node.edge, d.node.stage), ("launch", "inicia", 1))
+
+    def test_preview_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            w.auto_finish = False
+            w.run(max_duration=15)
+            w.sessions[next(iter(w.sessions))].update(state="done", status="idle")
+            before = self._files(w)
+            d = runner.preview_decision(w.state_path, kit_root=w.kit, deps=w.deps())
+            self.assertEqual(d.kind, "wait")
+            self.assertEqual(self._files(w), before)
+            self.assertFalse((w.task_dir / "git-after-01.txt").exists())
+
+    def test_preview_returns_ask_judge_without_calling_judge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, verdicts={2: "PASS_WITH_RISKS"})
+            w.judge_result = JudgeFailed("stop here")
+            w.run()
+            (w.task_dir / runner.JUDGE_LEDGER).unlink()
+            calls_before = len(w.judge_calls)
+            d = runner.preview_decision(w.state_path, kit_root=w.kit, deps=w.deps())
+            self.assertEqual((d.kind, d.question.kind, d.question.nn), ("ask_judge", "pass_with_risks", 2))
+            self.assertEqual(len(w.judge_calls), calls_before)
+
+    def test_decision_to_dict_is_json_serializable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            launch = runner.decision_to_dict(runner.preview_decision(w.state_path, kit_root=w.kit, deps=w.deps()))
+            self.assertEqual(launch["node"]["role"], ROLE)
+            json.dumps(launch)
+            ask = runner.decision_to_dict(runner.Decision(
+                "ask_judge", question=runner.Question("pass_with_risks", 2, ("continue", "stop"))))
+            self.assertEqual(json.loads(json.dumps(ask))["question"]["options"], ["continue", "stop"])
+
+
 class HelperTests(unittest.TestCase):
     def test_request_stop_without_lock_returns_false(self):
         with tempfile.TemporaryDirectory() as tmp:

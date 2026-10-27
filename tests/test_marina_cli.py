@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -204,6 +205,19 @@ class RunStatusStopCliTests(unittest.TestCase):
             self.assertTrue((task_dir / runner.STOP_NAME).exists())
 
 
+class McpCliTests(unittest.TestCase):
+    def test_mcp_subcommand_serves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            stdin = io.StringIO('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n'
+                                '{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n')
+            out = io.StringIO()
+            code = cli.main(["mcp", "--kit-root", str(kit)], stdin=stdin, stdout=out, stderr=io.StringIO())
+            self.assertEqual(code, 0)
+            ids = [json.loads(line)["id"] for line in out.getvalue().splitlines()]
+            self.assertEqual(ids, [1, 2])
+
+
 class BinWrapperTests(unittest.TestCase):
     def test_bin_wrapper_is_executable(self):
         self.assertTrue(os.access(BIN, os.X_OK))
@@ -214,7 +228,7 @@ class BinWrapperTests(unittest.TestCase):
                 [str(BIN), "--help"], cwd=tmp, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
             )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        for command in ("approve", "run", "status", "stop"):
+        for command in ("approve", "run", "status", "stop", "mcp"):
             self.assertIn(command, proc.stdout)
 
     def test_bin_wrapper_refuses_without_tty(self):
