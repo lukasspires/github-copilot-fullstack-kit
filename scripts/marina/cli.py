@@ -12,6 +12,8 @@ Subcommands:
   approved envelope (scripts/marina/runner.py); exit 0 on `done`, 1 on a
   stop or a refusal. `status` prints the task, lock, envelope and nodes;
   `stop` asks a running `run` to stop at its next iteration.
+- `mcp` (F5): the stdio MCP server for interactive Marina
+  (scripts/marina/mcp_server.py); stdout carries only JSON-RPC.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from scripts.marina import envelope, hooks, runner
+from scripts.marina import envelope, hooks, mcp_server, runner
 from scripts.state import StateError
 
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
@@ -47,6 +49,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--recover", action="store_true", help="take over an orphan lock if no task session works")
     status = commands.add_parser("status", help="show a task's lock, envelope and nodes")
     stop = commands.add_parser("stop", help="ask a running `marina run` to stop at its next iteration")
+    mcp = commands.add_parser("mcp", help="serve the MCP stdio server for interactive Marina")
+    mcp.add_argument("--kit-root", default=str(_DEFAULT_KIT_ROOT))
     for sub in (approve, run, status, stop):
         sub.add_argument("project")
         sub.add_argument("task")
@@ -174,6 +178,8 @@ def main(
         return 1
     if args.command == "hook":
         return _run_hook(args, stdin=stdin, stderr=stderr)
+    if args.command == "mcp":
+        return mcp_server.serve(stdin, stdout, kit_root=Path(args.kit_root), deps=mcp_server.default_mcp_deps())
     if args.command == "run":
         return _run_run(args, stdout=stdout, stderr=stderr, deps=deps)
     if args.command == "status":

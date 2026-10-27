@@ -48,6 +48,8 @@ class ArgvTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
         self.assertEqual(argv[argv.index("--max-budget-usd") + 1], judge.JUDGE_MAX_BUDGET_USD)
         self.assertIn("--no-session-persistence", argv)
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertNotIn("--mcp-config", argv)
         self.assertEqual(argv[-2], "--")
         self.assertIn(PATHS[0], argv[-1])
         for forbidden in ("--allowedTools", "bypassPermissions", "--permission-prompts", "--resume"):

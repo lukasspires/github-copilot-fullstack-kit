@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/marina/__main__.py — `python3 scripts/marina/__main__.py <hook|approve|run|status|stop> ...`.
+"""scripts/marina/__main__.py — `python3 scripts/marina/__main__.py <hook|approve|run|status|stop|mcp> ...`.
 
 Invoked by path from the Stop hook that `launch_claude` puts in each
 background session's `--settings`, from whatever cwd the session has, and
@@ -14,7 +14,8 @@ named on its command line. `approve` writes only the `[envelope.approval]`
 of the one task's `state.toml` it names, and only after the human types
 the task slug on a TTY. `run` writes only inside that task's directory
 (scripts/marina/runner.py), `status` only reads, and `stop` writes only
-the task's `.marina-run.stop` request.
+the task's `.marina-run.stop` request. `mcp` serves JSON-RPC on
+stdin/stdout; its tools write only inside the task directory they name.
 """
 
 from __future__ import annotations

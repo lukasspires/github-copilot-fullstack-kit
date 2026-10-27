@@ -223,7 +223,8 @@ def build_argv(
 
     Never accepts `--permission-mode`/`--settings` overrides from the
     caller — the mode is always `dontAsk` and the settings always
-    `build_settings(...)`. Under `dontAsk` the `--allowedTools` list is the
+    `build_settings(...)`, and `--strict-mcp-config` (with no `--mcp-config`)
+    keeps project MCP servers out of the session. Under `dontAsk` the `--allowedTools` list is the
     real boundary: the launch-derived write rules (`derive_write_rules`)
     come first, then the assignment's check-derived `Bash(...)` rules;
     anything else is denied, not queued. The ban on `bypassPermissions`
@@ -241,6 +242,9 @@ def build_argv(
         argv += ["--add-dir", target]
     argv += ["--settings", build_settings(kit_root, receipt_path, handoff_path)]
     argv += ["--permission-mode", "dontAsk"]
+    # The kit's project `.mcp.json` would otherwise stop every background
+    # session at the interactive "New MCP server found" dialog.
+    argv += ["--strict-mcp-config"]
     argv += ["--allowedTools", *write_rules, *handoff.allowlist]
     argv += extra_args
     prompt = CANONICAL_PROMPT.format(role=handoff.role, profile=handoff.profile, handoff=handoff_path)

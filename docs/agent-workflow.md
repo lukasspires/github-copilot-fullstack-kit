@@ -131,6 +131,7 @@ claude --bg --agent java-backend \
   --add-dir /absolute/api \
   --settings '{"worktree":{"bgIsolation":"none"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"python3 /absolute/kit/scripts/marina/__main__.py hook require-receipt --receipt /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md --handoff /absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-handoff.md"}]}]}}' \
   --permission-mode dontAsk \
+  --strict-mcp-config \
   --allowedTools "Edit(//absolute/api/**)" \
     "Edit(//absolute/kit/.agent-state/api/tasks/redmine-1234/01-java-backend-receipt.md)" \
     "Bash(mvn test)" \
@@ -138,6 +139,8 @@ claude --bg --agent java-backend \
 ```
 
 The per-invocation setting `worktree.bgIsolation: none` allows background edits in the shared checkout, including receipt writes. Its default is `worktree`, which blocks Edit/Write until isolation is entered. This setting changes checkout isolation, not permission approvals; the same `--settings` also carries the receipt Stop hook, and persistent user settings are never rewritten. If native policy prevents shared-checkout access, report that constraint and use the disclosed fallback after reconciling active sessions. See the [official setting reference](https://code.claude.com/docs/en/settings-reference#worktree-bgisolation).
+
+`--strict-mcp-config` (with no `--mcp-config`) keeps MCP servers out of background sessions. Without it, the kit's own project `.mcp.json` (the `marina` server) would stop every session launched from kit_root at the interactive "New MCP server found" dialog, which no unattended run may answer. The judge (`claude -p --agent marina-judge`) uses the same flag.
 
 Repeat `--add-dir` for other targets; do not use worktree isolation because assignments share the same local files. Never use `--resume`, `--continue` or `--fork-session` for new assignments. Capture the printed short ID and present it to the user. Monitor with `claude agents --json --all` and inspect details with `claude logs <id>`. Humans use `claude agents` and `claude attach <id>`.
 

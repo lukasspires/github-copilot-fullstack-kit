@@ -78,6 +78,7 @@ def build_argv(question: Question, paths: list[str], *, cli: str = "claude") -> 
         "--output-format", "json",
         "--max-budget-usd", JUDGE_MAX_BUDGET_USD,
         "--no-session-persistence",
+        "--strict-mcp-config",
         "--", build_prompt(question, paths),
     ]
 
