@@ -30,6 +30,8 @@ Este repositório é um **kit de coordenação**, não uma aplicação. Ele forn
 - [O que o kit faz e o que não faz](#o-que-o-kit-faz-e-o-que-não-faz)
 - [Pré-requisitos](#pré-requisitos)
 - [Início rápido](#início-rápido)
+- [Uso e contribuição pública](#uso-e-contribuição-pública)
+- [Licença](#licença)
 - [Como uma tarefa é executada](#como-uma-tarefa-é-executada)
 - [Cadeias sem supervisão (`marina run`)](#cadeias-sem-supervisão-marina-run)
 - [Equipe de agentes](#equipe-de-agentes)
@@ -86,9 +88,19 @@ Claude Code descobre `.claude/skills/` de diretórios adicionados, mas **não** 
 Descreva o resultado esperado, os projetos envolvidos, anexe a evidência da tarefa (PDF, link, texto) e informe os critérios de aceitação conhecidos. Exemplo:
 
 ```text
-Implementar a tarefa #8144 (PDF anexo). Repositórios: /abs/bff (Node) e /abs/front (Angular).
+Implementar a tarefa #1234 (PDF anexo). Repositórios: /abs/bff (Node) e /abs/front (Angular).
 Preservar o contrato atual do endpoint /v1/pacientes. Critério: testes existentes continuam verdes.
 ```
+
+## Uso e contribuição pública
+
+Este kit é um projeto pessoal de coordenação de agentes. As skills condicionais do Códice contêm resumos históricos para orientar a verificação no projeto-alvo; **não são documentação oficial nem atestam conformidade** com normas da SES/SC, NADS ou DTIG.
+
+Não inclua credenciais, dados pessoais, documentos internos ou configurações locais em issues, pull requests, exemplos ou fixtures. O estado de tarefas em `.agent-state/` e `.claude/settings.local.json` deve permanecer local. Antes de enviar alterações, execute `python3 scripts/kit_lint.py` e confira o diff e os arquivos preparados para commit. Consulte [CONTRIBUTING.md](CONTRIBUTING.md) para colaborar e [SECURITY.md](SECURITY.md) para relatar uma vulnerabilidade sem publicá-la em uma issue.
+
+## Licença
+
+Distribuído sob a [Apache License 2.0](LICENSE). Os resumos históricos de normas e práticas citados neste kit não substituem suas fontes oficiais.
 
 ## Como uma tarefa é executada
 
@@ -171,7 +183,7 @@ Skills são procedimentos carregados sob demanda. No Claude Code, Marina e os es
 - **Quando usar:** escopo incerto, histórico longo, vários repositórios ou retomada de uma tarefa interrompida. Uma tarefa limitada a um especialista pode ir direto ao papel.
 - **Exemplo:**
   ```text
-  /task-execution Retomar a tarefa #7976. Checkpoint em .agent-state/agenda/tasks/redmine-7976/checkpoint.md. Verificar o estado atual dos repositórios antes de qualquer nova sessão.
+  /task-execution Retomar a tarefa #5678. Checkpoint em .agent-state/agenda/tasks/redmine-5678/checkpoint.md. Verificar o estado atual dos repositórios antes de qualquer nova sessão.
   ```
 
 #### `quality-gate`

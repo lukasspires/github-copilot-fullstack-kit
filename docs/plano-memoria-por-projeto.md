@@ -56,7 +56,7 @@ A própria conversa conclui que o protocolo de leitura/escrita importa mais que 
             └── inputs/                         # PDFs/anexos da tarefa (antes: tmp/pdfs/ e Task #*.pdf na raiz)
 ```
 
-**`<projeto>`**: slug minúsculo (`^[a-z0-9-]+$`) do diretório do repositório-alvo; quando a tarefa envolve vários repositórios, do diretório de workspace que os agrupa (`/home/lukassp/dev/Agenda` → `agenda`). A Marina registra o slug e os `target_root` no cabeçalho do checkpoint e em `project/repositories.md`.
+**`<projeto>`**: slug minúsculo (`^[a-z0-9-]+$`) do diretório do repositório-alvo; quando a tarefa envolve vários repositórios, do diretório de workspace que os agrupa (`/caminho/do/workspace/Agenda` → `agenda`). A Marina registra o slug e os `target_root` no cabeçalho do checkpoint e em `project/repositories.md`.
 
 Os arquivos de `project/` são opcionais e criados sob demanda; um projeto novo começa só com `repositories.md`.
 
