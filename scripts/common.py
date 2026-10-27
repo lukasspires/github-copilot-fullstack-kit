@@ -16,6 +16,7 @@ responds to a native approval prompt; callers must print `claude attach
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import re
 import shutil
@@ -153,6 +154,24 @@ def _run_git(args: list[str], *, cwd: str, timeout: int) -> str:
     return proc.stdout
 
 
+class GitCommandFailed(RuntimeError):
+    """A read-only git command exited non-zero; never read its output as a clean state."""
+
+
+def _run_git_checked(args: list[str], *, cwd: str, timeout: int) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GitCommandFailed(f"git {' '.join(args)} failed in {cwd} (exit {proc.returncode}): {proc.stderr.strip()[:200]}")
+    return proc.stdout
+
+
 def git_status_diff(target: str, *, timeout: int = 15, runner: Callable[..., str] = _run_git) -> str:
     """Read-only `git status --short` + `git diff --stat` for one target.
 
@@ -162,6 +181,52 @@ def git_status_diff(target: str, *, timeout: int = 15, runner: Callable[..., str
     status = runner(["status", "--short"], cwd=target, timeout=timeout)
     diff_stat = runner(["diff", "--stat"], cwd=target, timeout=timeout)
     return f"# git status --short\n{status}\n# git diff --stat\n{diff_stat}"
+
+
+def git_snapshot(
+    target: str,
+    *,
+    timeout: int = 15,
+    runner: Callable[..., str] = _run_git_checked,
+    read_bytes: Callable[[Path], bytes] = Path.read_bytes,
+) -> str:
+    """Read-only snapshot that changes whenever tracked or untracked content does.
+
+    Stronger than `git_status_diff` (whose `--stat` can match two different
+    diffs): status with every untracked file, the sha256 of the full binary
+    diff against HEAD, and the sha256 of each untracked file's bytes. Used by
+    `marina run`'s Git gate between writers (F4 plan, decision 4). `-z`
+    keeps paths unquoted (accented names included), and a failing git
+    command raises `GitCommandFailed` instead of yielding an empty, equal
+    snapshot that would let a writer through.
+    """
+
+    status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=target, timeout=timeout)
+    diff = runner(["diff", "HEAD", "--binary"], cwd=target, timeout=timeout)
+    entries = status.split("\0")
+    untracked: list[str] = []
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        if entry.startswith("?? "):
+            untracked.append(entry[3:])
+        elif entry[:1] in ("R", "C"):
+            index += 1  # a rename/copy entry is followed by its source path
+        index += 1
+    untracked.sort()
+    hashes = [f"{hashlib.sha256(read_bytes(Path(target) / path)).hexdigest()}  {path}" for path in untracked]
+    readable_status = "\n".join(e for e in entries if e)
+    return (
+        f"# git status --porcelain=v1 -z --untracked-files=all\n{readable_status}\n"
+        f"# git diff HEAD --binary sha256\n{hashlib.sha256(diff.encode('utf-8')).hexdigest()}\n"
+        "# untracked sha256\n" + "".join(f"{line}\n" for line in hashes)
+    )
+
+
+def git_current_branch(target: str, *, timeout: int = 15, runner: Callable[..., str] = _run_git_checked) -> str:
+    """Read-only `git rev-parse --abbrev-ref HEAD` for one target."""
+
+    return runner(["rev-parse", "--abbrev-ref", "HEAD"], cwd=target, timeout=timeout).strip()
 
 
 # --------------------------------------------------------------------------

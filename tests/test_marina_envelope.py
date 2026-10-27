@@ -24,7 +24,8 @@ KIT_ROOT = Path(__file__).resolve().parent.parent
 TZ = datetime.timezone(datetime.timedelta(hours=-3))
 NOW = datetime.datetime(2026, 10, 26, 21, 0, 0, tzinfo=TZ)
 TARGET = "/abs/api"
-HANDOFF = "01-java-backend-handoff.md"
+HANDOFF = "stage-1-handoff-template.md"
+TEMPLATE = "## Objective\n\nDo it.\n\n## Write scope\n\n`src/`\n\n## Acceptance criteria\n\n1. Works.\n"
 
 
 def raw_envelope(**overrides) -> dict:
@@ -50,7 +51,7 @@ class TaskFixture:
         self.task_dir = Path(tmp) / ".agent-state" / "demo" / "tasks" / slug
         self.task_dir.mkdir(parents=True)
         self.state_path = self.task_dir / "state.toml"
-        (self.task_dir / HANDOFF).write_text("# handoff\n", encoding="utf-8")
+        (self.task_dir / HANDOFF).write_text(TEMPLATE, encoding="utf-8")
         doc = state.init_state(
             self.state_path, project="demo", slug=slug, title="Demo task", kit_root=str(KIT_ROOT),
             targets=[TARGET], at=NOW,
@@ -136,7 +137,7 @@ class ValidateTests(unittest.TestCase):
             self.assertEqual(len(self._errors(tmp, stages=[])), 1)
 
     def test_reader_or_unknown_or_marina_role_refused(self):
-        for role in ("reviewer", "nope", "marina"):
+        for role in ("reviewer", "nope", "marina", "marina-judge"):
             with self.subTest(role=role), tempfile.TemporaryDirectory() as tmp:
                 errors = self._errors(tmp, stages=[{"role": role, "handoff": HANDOFF}])
                 self.assertEqual(len(errors), 1, errors)
@@ -149,10 +150,30 @@ class ValidateTests(unittest.TestCase):
             self.assertEqual(len(errors), 1, errors)
             self.assertIn("prossegue", errors[0])
 
+    def test_canonical_template_name_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp)
+            (fx.task_dir / "01-java-backend-handoff.md").write_text(TEMPLATE, encoding="utf-8")
+            env = env_mod.parse_envelope(
+                raw_envelope(stages=[{"role": "java-backend", "handoff": "01-java-backend-handoff.md"}])
+            )
+            errors = env_mod.validate_envelope(env, doc=fx.doc(), kit_root=KIT_ROOT, task_dir=fx.task_dir)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("canonical assignment file name", errors[0])
+
+    def test_template_without_sections_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp)
+            (fx.task_dir / HANDOFF).write_text("# just a title\n", encoding="utf-8")
+            env = env_mod.parse_envelope(raw_envelope())
+            errors = env_mod.validate_envelope(env, doc=fx.doc(), kit_root=KIT_ROOT, task_dir=fx.task_dir)
+            self.assertEqual(len(errors), 3, errors)
+            self.assertTrue(all(HANDOFF in e for e in errors), errors)
+
     def test_handoff_outside_task_dir_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             outside = Path(tmp) / "outside.md"
-            outside.write_text("x\n", encoding="utf-8")
+            outside.write_text(TEMPLATE, encoding="utf-8")
             fx = TaskFixture(tmp)
             (fx.task_dir / "link.md").symlink_to(outside)
             for handoff in ("../outside.md", str(outside), "link.md", "missing.md"):
@@ -306,7 +327,7 @@ class ApproveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fx = TaskFixture(tmp, envelope=raw_envelope(allowlist=["Bash(mvn test)", "Bash(mvn verify)"]))
             _, out, _ = self._approve(fx, "no\n")
-            for fragment in ("t1 — Demo task", "1. java-backend — 01-java-backend-handoff.md", TARGET, "feat/x",
+            for fragment in ("t1 — Demo task", f"1. java-backend — {HANDOFF}", "same allowlist", TARGET, "feat/x",
                              "Bash(mvn test)", "Bash(mvn verify)", "each_stage", "max_corrections: 1", "8h",
                              "judge_max_calls: 4", "on_pass_with_risks: judge", "sha256: ",
                              "Type the task slug (t1) to approve: "):
