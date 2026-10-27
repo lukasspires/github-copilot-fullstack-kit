@@ -220,5 +220,72 @@ class ClaudeSubprocessStdinTests(unittest.TestCase):
         self.assertIs(fake_run.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
 
+class GitSnapshotTests(unittest.TestCase):
+    """`git_snapshot` (F4): status + full diff hash + untracked content hashes."""
+
+    def _runner(self, *, status: str = " M a.py\0?? new.txt\0", diff: str = "diff --git a/a.py\n+x\n"):
+        calls: list[list[str]] = []
+
+        def runner(args, *, cwd, timeout):
+            calls.append(list(args))
+            if args[0] == "status":
+                return status
+            if args[0] == "diff":
+                return diff
+            if args[0] == "rev-parse":
+                return "feat/x\n"
+            raise AssertionError(args)
+
+        return runner, calls
+
+    def _snapshot(self, runner, content: bytes = b"hello") -> str:
+        return common.git_snapshot("/repo", runner=runner, read_bytes=lambda p: content)
+
+    def test_snapshot_changes_with_diff_content(self):
+        first, _ = self._runner(diff="diff --git a/a.py\n+x\n")
+        second, _ = self._runner(diff="diff --git a/a.py\n+y\n")
+        self.assertNotEqual(self._snapshot(first), self._snapshot(second))
+
+    def test_untracked_content_change_is_foreign(self):
+        runner, _ = self._runner()
+        self.assertNotEqual(self._snapshot(runner, b"hello"), self._snapshot(runner, b"hello!"))
+
+    def test_snapshot_is_stable(self):
+        runner, _ = self._runner()
+        self.assertEqual(self._snapshot(runner), self._snapshot(runner))
+
+    def test_snapshot_lists_untracked_files(self):
+        runner, _ = self._runner(status="?? b.txt\0?? a.txt\0")
+        seen: list[Path] = []
+        common.git_snapshot("/repo", runner=runner, read_bytes=lambda p: seen.append(p) or b"x")
+        self.assertEqual(seen, [Path("/repo/a.txt"), Path("/repo/b.txt")])
+
+    def test_accented_and_renamed_paths_are_read_unquoted(self):
+        runner, calls = self._runner(status="?? an\u00e1lise.md\0R  novo.py\0velho.py\0?? dir/x y.txt\0")
+        seen: list[Path] = []
+        common.git_snapshot("/repo", runner=runner, read_bytes=lambda p: seen.append(p) or b"x")
+        self.assertEqual(seen, [Path("/repo/an\u00e1lise.md"), Path("/repo/dir/x y.txt")])
+        self.assertIn("-z", calls[0])
+
+    def test_failed_git_raises_instead_of_empty_snapshot(self):
+        failed = subprocess.CompletedProcess(["git"], 128, "", "fatal: not a git repository")
+        with mock.patch("scripts.common.subprocess.run", return_value=failed):
+            with self.assertRaises(common.GitCommandFailed):
+                common.git_snapshot("/repo")
+            with self.assertRaises(common.GitCommandFailed):
+                common.git_current_branch("/repo")
+
+    def test_current_branch_strips(self):
+        runner, _ = self._runner()
+        self.assertEqual(common.git_current_branch("/repo", runner=runner), "feat/x")
+
+    def test_git_calls_are_read_only(self):
+        runner, calls = self._runner()
+        self._snapshot(runner)
+        common.git_current_branch("/repo", runner=runner)
+        self.assertTrue(calls)
+        self.assertTrue(all(c[0] in ("status", "diff", "rev-parse") for c in calls), calls)
+
+
 if __name__ == "__main__":
     unittest.main()

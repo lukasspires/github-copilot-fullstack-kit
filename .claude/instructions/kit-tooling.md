@@ -6,9 +6,9 @@
 - No network access. Git usage is read-only (`status`, `diff`, `rev-parse`) — never `checkout`, `reset`, or `commit`.
 - Role write scope (you, authoring this tooling): `scripts/`, `tests/`, and your own assignment's `.agent-state/<project>/tasks/<task>/` receipt, as scoped by the handoff; never a target repository.
 - Script runtime write scope (a finished script, once it runs): only `.agent-state/<project>/tasks/<task>/` and the checkpoint — never `scripts/`, `tests/`, or a target repository. A script that writes outside this is out of scope regardless of who authored it.
-- Native session manager access is limited to exactly `claude agents --json --all` and `claude logs <id>` with a bounded line limit — no other manager subcommand is sanctioned.
+- Native session manager access is limited to exactly `claude agents --json --all` and `claude logs <id>` with a bounded line limit — no other manager subcommand is sanctioned. The only other sanctioned `claude` invocations are `claude --bg` through `launch_claude` and the judge, `claude -p --agent marina-judge --tools Read --json-schema … --no-session-persistence` through `scripts/marina/judge.py`, always with stdin closed.
 - Never respond to a native approval prompt from inside a script; print the exact `claude attach <id>` instruction for the human instead.
-- One launch/dispatch per script invocation; never chain a second writer automatically.
+- One launch/dispatch per script invocation; never chain a second writer automatically, except `marina run` inside a human-approved envelope, one node at a time.
 - Refuse to construct `bypassPermissions`, `--permission-prompts none`, `--resume`, `--continue`, `--fork-session`, or a broad allowlist pattern (bare `Bash`, `Bash(*)`).
 - Output must be readable by both a human and Marina, with a meaningful process exit code; an optional `--json` mode is allowed but never required.
 - Validate any external schema explicitly (the native session manager's JSON fields in particular) and fail loudly on drift; do not silently tolerate a missing or renamed field.

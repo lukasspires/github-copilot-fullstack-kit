@@ -7,9 +7,11 @@ as planned in docs/plano-f3-envelope-e-decide-2026-10.md:
   `scripts.state` preserves (`StateDoc.envelope`). Unknown keys are refused,
   because the approval hash only covers the known ones (plan decision 4).
 - `validate_envelope` checks it against the task and the kit: writer roles
-  with a profile (never `marina`, and the same role in every stage, since
+  with a profile (never `marina` or `marina-judge`, and the same role in every stage, since
   G3 `prossegue` requires the predecessor's role — plan decision 9),
-  handoffs inside the task directory, absolute targets that belong to the
+  stage templates inside the task directory, never named like a canonical
+  assignment file and with the sections `handoff_gen` needs (F4 plan,
+  decision 1), absolute targets that belong to the
   task and each have a branch (decision 5), and the same allowlist
   refusals as `launch_claude`.
 - `compute_hash` covers the envelope without its approval plus the content
@@ -33,6 +35,7 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from scripts.launch_claude import LaunchRefused, _check_forbidden_allowlist
+from scripts.marina import handoff_gen
 from scripts.state import StateDoc, StateError, read_state, write_state
 from scripts.state.model import mode_for_role
 
@@ -53,6 +56,8 @@ _REQUIRED_KEYS = (
 _DURATION_RE = re.compile(r"^([1-9][0-9]*)([smh])$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+# Profiles that exist in .claude/agents/ but never run a stage (F4 plan, decision 10).
+_COORDINATION_ROLES = ("marina", "marina-judge")
 
 
 class EnvelopeError(StateError):
@@ -207,8 +212,8 @@ def parse_duration(text: str) -> int:
 def _role_errors(env: Envelope, kit_root: Path) -> list[str]:
     errors = []
     for index, stage in enumerate(env.stages):
-        if stage.role == "marina":
-            errors.append(f"stages[{index}] role 'marina' is the coordinator, not a writer specialist")
+        if stage.role in _COORDINATION_ROLES:
+            errors.append(f"stages[{index}] role {stage.role!r} is coordination, not a writer specialist")
         elif not (kit_root / ".claude" / "agents" / f"{stage.role}.md").is_file():
             errors.append(f"stages[{index}] role {stage.role!r} has no profile in .claude/agents/")
         elif mode_for_role(stage.role) != "writer":
@@ -229,11 +234,20 @@ def _handoff_errors(env: Envelope, task_dir: Path) -> list[str]:
         if os.path.isabs(stage.handoff):
             errors.append(f"stages[{index}] handoff {stage.handoff!r} must be relative to the task directory")
             continue
+        if handoff_gen.CANONICAL_NAME_RE.fullmatch(Path(stage.handoff).name):
+            errors.append(
+                f"stages[{index}] handoff {stage.handoff!r} uses a canonical assignment file name; "
+                "name templates like stage-<n>-handoff-template.md"
+            )
+            continue
         resolved = (task_dir / stage.handoff).resolve()
         if not resolved.is_relative_to(root):
             errors.append(f"stages[{index}] handoff {stage.handoff!r} resolves outside the task directory")
         elif not resolved.is_file():
             errors.append(f"stages[{index}] handoff {stage.handoff!r} does not exist in the task directory")
+        else:
+            text = resolved.read_text(encoding="utf-8")
+            errors += [f"stages[{index}] handoff {stage.handoff!r}: {e}" for e in handoff_gen.template_errors(text)]
     return errors
 
 
@@ -308,6 +322,7 @@ def format_summary(env: Envelope, doc: StateDoc, sha256: str) -> str:
     lines += [f"  {t} (branch {env.branches.get(t, '?')})" for t in env.targets]
     lines.append("allowlist:")
     lines += [f"  {entry}" for entry in env.allowlist]
+    lines.append("  (reviewer and correction nodes use this same allowlist)")
     lines += [
         f"review: {env.review}",
         f"max_corrections: {env.max_corrections}",

@@ -67,7 +67,7 @@ A task's mechanical state is `<kit_root>/.agent-state/<project>/tasks/<task>/sta
 
 ### Assignment state machine (G2)
 
-States of `assignments[].state`, one terminal transition per predecessor/successor pair; opening the next node is a separate G3 edge chosen by Marina, never automatic.
+States of `assignments[].state`, one terminal transition per predecessor/successor pair; opening the next node is a separate G3 edge chosen by Marina, never automatic outside a human-approved envelope (`marina approve`).
 
 ```
 reserved --preflight PASS--> prepared --launch, ID captured--> launched --status--> working --status--> waiting_approval --human attach--> working
@@ -106,6 +106,16 @@ The fixture at `tests/fixtures/visible-sessions/state.toml` uses `revisa_direta`
 ### Correction loop and its stop condition
 
 `writer → reviewer(FAIL) → corrige → reviewer …` continues only while each correction resolves distinct findings. It ends when: the verdict reaches `PASS`/`PASS_WITH_RISKS`; the chain enters `needs_input`/`blocked` pending the user; **or** the reviewer's `risks_digest` for round *k* substantially overlaps round *k-1* (normalized risk titles) — `gate` then refuses `corrige` and offers `analisa` instead, with Marina choosing the analysis target. A second consecutive `FAIL` in the same chain — even with distinct findings — requires an explicit user decision recorded in the journal before `corrige` is allowed again; this is a human-in-the-loop checkpoint, not a retry limit.
+
+### Approved envelopes (`marina run`)
+
+An optional `[envelope]` table in `state.toml` lists the stages (one writer role for every stage, each with a stage handoff template), targets with their branches, the allowlist, the review mode and the limits. Only `marina approve <project> <task>` records its approval, on a TTY after the human types the task slug; the approval hash covers the envelope and the templates, so editing either invalidates it.
+
+- `marina run <project> <task> --interval S --max-duration D [--notify-cmd CMD] [--recover]` opens, one node at a time, only the nodes of the envelope's expansion (`inicia`/`prossegue` per stage, `revisa`, and at most one `corrige` per stage after a `FAIL`), each through the Git gate, `gate`, `state add`, a generated handoff, preflight and `launch_claude`. It stops, with the reason in a generated `## Execução marina-run` section of the checkpoint, on anything else: a changed envelope or branch, a foreign change between writers, a second consecutive `FAIL`, a judge failure, a missing or invalid receipt, the time limit, an unforeseen error, Ctrl-C (`interrupted`), or `marina stop`. A process killed outright cannot write that section and leaves an orphan lock, which `marina run --recover` takes over only when no session of the task is still working. Every `claude` child of the run starts from the kit root, whatever directory `marina run` was called from.
+- `marina status` shows the lock, the envelope and the nodes; `marina stop` asks the run to stop at its next iteration.
+- Stage templates are never named like a canonical `NN-<role>-handoff.md` (the run generates those) and must have `Objective`, `Write scope` and `Acceptance criteria`. Reviewer and correction nodes use the envelope's allowlist unchanged, so it must include what reviewers need (for example `Bash(git diff *)`).
+- The only ambiguous case delegated is `PASS_WITH_RISKS` with `on_pass_with_risks = "judge"`: the read-only `marina-judge` (`claude -p --tools Read`, structured output) picks one of the offered options, at most `judge_max_calls` times; every call goes to `judge-calls.jsonl`.
+- The run never answers a native approval (it can run `--notify-cmd` once per entry into `waiting_approval`), never retries an `uncertain` launch, never archives or deletes sessions and writes only inside the task directory.
 
 ### Native platform metadata
 

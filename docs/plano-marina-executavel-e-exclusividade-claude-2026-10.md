@@ -150,7 +150,7 @@ Cada iteração de `marina run <projeto> <tarefa> --interval <s> --max-duration 
 
 **Segundo FAIL consecutivo.** Sempre `stop`, independentemente da juíza: continua exigindo decisão humana registrada no journal. Por isso `max_corrections` aceita só 0 ou 1 no schema v1; a aprovação do envelope não conta como essa decisão antecipada. Aceitar mais correções automáticas exige mudar essa regra explicitamente, fora deste plano.
 
-**Abertura de nó.** `state add` (by `marina-run`) → `handoff_gen` → `preflight` → `gate` → `launch_claude`. Uma falha em qualquer passo registra o terminal correspondente (`preparation_failed`, `uncertain`) e para.
+**Abertura de nó.** `state add` (by `marina-run`) → `handoff_gen` → `preflight` → `gate` → `launch_claude`. Na F4 o `gate` roda antes do `state add`, porque avalia um nó proposto que ainda não existe; os handoffs dos estágios do envelope são templates com nome não canônico, e o handoff de cada nó é gerado; as chamadas da juíza ficam em `judge-calls.jsonl`, que conta a cota entre reinícios (plano F4, decisões 1, 2 e 5). Uma falha em qualquer passo registra o terminal correspondente (`preparation_failed`, `uncertain`) e para.
 
 **Gate de Git.** O runner grava `git-before-NN.txt` no launch e `git-after-NN.txt` ao observar `finished` de cada writer. Antes do próximo writer, reconhece o diff automaticamente só se o `git status`/`git diff` atual for idêntico ao `git-after` do writer anterior; qualquer diferença → `stop(foreign_change)`.
 
@@ -217,7 +217,7 @@ Cada fase é uma atribuição própria ao `kit-tooling` (código em `scripts/`/`
 | F1 | Spike só de leitura no CLI instalado (2.1.306): formato de `hooks` via `--settings`; se soma às configurações do usuário; campo de Stop hook ativo; `claude -p --agent --json-schema --tools`. **Executada em 2026-10-25** — ver achados | F0 |
 | F2 | `dontAsk` com regras de escrita derivadas, Stop hook `require-receipt`, `stdin=DEVNULL` e classificação de `blocked` em `launch_claude`/`status_claude`; alinhamento de `AGENTS.md`, `CLAUDE.md`, skill, `agent-workflow.md` e README (seção 3.5) | F1 e decisão de permissão (2026-10-25) |
 | F3 | `envelope.py`, schema v1, `marina approve`, `decide.py`, faixa cinzenta no `gate` | F0 |
-| F4 | `handoff_gen.py`, `judge.py` com perfil `marina-judge`, `runner.py`, `marina run/status/stop`; **no mesmo bloco**, a reescrita da regra em `AGENTS.md` e `docs/agent-workflow.md`: "opening the next node is never automatic outside a human-approved envelope (`marina approve`)", e a exceção da juíza à regra "never delegate to another coordinator" (juíza só leitura, decide entre opções dadas) | F1, F3 |
+| F4 | `handoff_gen.py`, `judge.py` com perfil `marina-judge`, `runner.py`, `marina run/status/stop`; **no mesmo bloco**, a reescrita da regra em `AGENTS.md` e `docs/agent-workflow.md`: "opening the next node is never automatic outside a human-approved envelope (`marina approve`)", e a exceção da juíza à regra "never delegate to another coordinator" (juíza só leitura, decide entre opções dadas). **Executada em 2026-10** — ver [plano-f4-runner-e-juiza-2026-10.md](plano-f4-runner-e-juiza-2026-10.md) | F1, F3 |
 | F5 | `mcp_server.py`, `.mcp.json`, `tools` do perfil `marina.md`, ajuste da skill `task-execution` | F4 |
 | F6 | README, `agent-workflow.md`, tabela de ferramentas; aceitação real (3.7) | F2, F5 |
 
