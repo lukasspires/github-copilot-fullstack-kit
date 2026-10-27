@@ -1,0 +1,3 @@
+#!/bin/sh
+# bin/marina — run Marina's executable from any working directory.
+exec python3 "$(dirname "$(readlink -f "$0")")/../scripts/marina/__main__.py" "$@"

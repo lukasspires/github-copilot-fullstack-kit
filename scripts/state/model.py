@@ -10,10 +10,15 @@ invariants of docs/plano-estado-estruturado-e-grafos.md §5 are
 `state-lint`'s job (scripts/state_lint.py), not this module's — keeping
 the two layers separate makes each independently testable per the
 handoff's acceptance criteria.
+
+The optional `[envelope]` table is kept opaque here: `StateDoc.envelope`
+preserves it exactly as read so every write keeps an approved envelope.
+Interpreting and validating it is `scripts/marina/envelope.py`'s job.
 """
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import datetime
 import re
@@ -375,6 +380,7 @@ class StateDoc:
     schema: int
     task: Task
     assignments: list[Assignment]
+    envelope: Optional[dict] = None
 
     @staticmethod
     def from_raw(raw: dict) -> "StateDoc":
@@ -385,15 +391,23 @@ class StateDoc:
         if "task" not in raw:
             raise StateError("state.toml missing [task] table")
         task = Task.from_dict(raw["task"])
+        envelope = raw.get("envelope")
+        if envelope is not None and not isinstance(envelope, dict):
+            raise StateError("[envelope] must be a table")
         assignments = [Assignment.from_dict(a) for a in raw.get("assignments", [])]
-        return StateDoc(schema=raw["schema"], task=task, assignments=assignments)
+        return StateDoc(
+            schema=raw["schema"],
+            task=task,
+            assignments=assignments,
+            envelope=copy.deepcopy(envelope),
+        )
 
     def to_raw(self) -> dict:
-        return {
-            "schema": self.schema,
-            "task": self.task.to_dict(),
-            "assignments": [a.to_dict() for a in self.assignments],
-        }
+        out: dict[str, Any] = {"schema": self.schema, "task": self.task.to_dict()}
+        if self.envelope is not None:
+            out["envelope"] = copy.deepcopy(self.envelope)
+        out["assignments"] = [a.to_dict() for a in self.assignments]
+        return out
 
     def get_assignment(self, nn: int) -> Assignment:
         for a in self.assignments:

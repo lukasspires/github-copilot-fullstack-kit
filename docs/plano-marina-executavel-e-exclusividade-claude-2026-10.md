@@ -1,6 +1,6 @@
 # Plano: Marina executável e exclusividade Claude — 2026-10-25
 
-**Status:** design aprovado por seções em 2026-10-25; F0 implementada (PR #7). Revisado após a F1 (2026-10-25): seções 3.3 e 3.5 ajustadas e decisão de permissão pendente — ver [achados-f1-spike-hooks-e-juiza-2026-10.md](achados-f1-spike-hooks-e-juiza-2026-10.md). Base de análise: [analise-marina-executavel-e-exclusividade-claude-2026-10.md](analise-marina-executavel-e-exclusividade-claude-2026-10.md).
+**Status:** design aprovado por seções em 2026-10-25; F0 implementada (PR #7); F1 e F2 implementadas (PR #8), com a permissão decidida (`dontAsk`). Revisado após a F1 (2026-10-25): seções 3.3 e 3.5 ajustadas — ver [achados-f1-spike-hooks-e-juiza-2026-10.md](achados-f1-spike-hooks-e-juiza-2026-10.md). Base de análise: [analise-marina-executavel-e-exclusividade-claude-2026-10.md](analise-marina-executavel-e-exclusividade-claude-2026-10.md).
 
 **Escopo.** Dois sub-projetos, executados em ordem:
 
@@ -25,7 +25,7 @@
 | Linguagem | Meio, não requisito: evoluir o Python stdlib atual (abordagem A), reaproveitando scripts e testes |
 | Hooks de enforcement | No sub-projeto 2 (fase F2), porque `launch_claude` monta o `--settings` |
 
-**Restrições que permanecem:** nada de `bypassPermissions` ou `--permission-prompts none`; aprovações nativas esperam o humano via `claude attach`; sessões visíveis via `claude --bg`, sem fork/resume/continue; writers sequenciais; sessões nunca arquivadas automaticamente; segredos nunca no estado.
+**Restrições que permanecem:** nada de `bypassPermissions` ou `--permission-prompts none`; comandos fora da allowlist são negados (`dontAsk`) e vão para o receipt; aprovações nativas nunca são respondidas por código; sessões visíveis via `claude --bg`, sem fork/resume/continue; writers sequenciais; sessões nunca arquivadas automaticamente; segredos nunca no estado.
 
 **Abordagens descartadas:** Go incremental chamando os scripts Python (duas linguagens escrevendo o mesmo `state.toml` por muito tempo); reescrita total em Go (maior custo e risco de regressão sobre 281 testes, sem objetivo que dependa da linguagem). Portar para Go continua possível depois, com a interface MCP e o schema v1 já definidos.
 
@@ -112,9 +112,9 @@ sha256 = "<sha256 do envelope sem approval + conteúdo dos handoffs citados>"
 
 **Expansão em grafo.** O estágio 1 é `inicia`; cada estágio seguinte é `prossegue`. `review = "each_stage"` insere `revisa` após cada estágio; `"final"` insere um único `revisa` após o último. Um `FAIL` produz `corrige` com o papel do writer revisado, até `max_corrections` por estágio, seguido de novo `revisa`. Com `review = "final"`, a correção conta na cota do último estágio. O runner nunca cria papel, aresta (`analisa`, `continua`, `substitui`, `revisa_direta`) ou alvo fora dessa expansão.
 
-**Predecessores, conforme G3.** `revisa` tem como predecessor o último writer `accepted` do estágio (o writer original ou o último `corrige`). `corrige` tem como predecessor o reviewer `accepted` com `verdict = FAIL`. `prossegue` tem como predecessor o último writer `accepted` do estágio anterior, e só é aberto depois que a revisão desse estágio terminou em `PASS` (ou `PASS_WITH_RISKS` aceito); com `review = "final"`, logo após o writer ser aceito.
+**Predecessores, conforme G3.** `revisa` tem como predecessor o último writer `accepted` do estágio (o writer original ou o último `corrige`). `corrige` tem como predecessor o reviewer `accepted` com `verdict = FAIL`. `prossegue` tem como predecessor o writer que abriu o estágio anterior (`inicia` ou `prossegue`), porque o G3 exige do `prossegue` o mesmo papel e o mesmo tipo do predecessor, e um `corrige` tem tipo `correção`; pelo mesmo motivo, todos os estágios usam o mesmo papel. Ele só é aberto depois que a revisão desse estágio terminou em `PASS` (ou `PASS_WITH_RISKS` aceito); com `review = "final"`, logo após o writer ser aceito.
 
-**Validação.** Cada estágio usa um papel writer existente em `.claude/agents/`; cada handoff citado existe dentro do diretório da tarefa; `targets` são caminhos absolutos; `allowlist` passa pelas mesmas recusas de `launch_claude` (`_check_forbidden_allowlist`); `max_corrections ∈ {0, 1}`; `judge_max_calls ≥ 0`.
+**Validação.** Cada estágio usa um papel writer existente em `.claude/agents/`; cada handoff citado existe dentro do diretório da tarefa; `targets` são caminhos absolutos; `allowlist` passa pelas mesmas recusas de `launch_claude` (`_check_forbidden_allowlist`); `max_corrections ∈ {0, 1}`; `judge_max_calls ≥ 0`; cada alvo pertence a `task.targets` e tem um branch; o papel de `revisa` é sempre `reviewer`. Chaves desconhecidas no `[envelope]` são recusadas, porque o hash cobre só as conhecidas. "Schema v1" é a versão do envelope dentro de um `state.toml` `schema = 1` (plano F3, decisões 2 a 5 e 9).
 
 **Aprovação.** Só `marina approve <projeto> <tarefa>` grava `[envelope.approval]`. Exige TTY: imprime um resumo (estágios, papéis, alvos, branches, allowlist, limites, política de juíza) e pede que o usuário digite o slug da tarefa. Sem TTY, recusa com código de saída não zero.
 
@@ -146,7 +146,7 @@ Cada iteração de `marina run <projeto> <tarefa> --interval <s> --max-duration 
 | reviewer `FAIL` | `accepted` (a revisão em si é válida); depois `corrige` se P_progresso passa, há cota em `max_corrections` e não é o 2º FAIL consecutivo da cadeia; `ask_judge` se a sobreposição do `risks_digest` cai na faixa cinzenta; senão `stop` |
 | `preparation_failed` | `stop` |
 
-**Faixa cinzenta.** `gate.risks_overlap_substantially` passa a expor a razão de sobreposição. Acima do limiar atual → sem progresso (`stop`); abaixo de um limiar inferior novo → progresso (`corrige`); entre os dois → `ask_judge`. O limiar inferior é uma constante em `gate.py` com teste.
+**Faixa cinzenta.** `gate.risks_overlap_substantially` passa a expor a razão de sobreposição. Acima do limiar atual → sem progresso (`stop`); abaixo de um limiar inferior novo → progresso (`corrige`); entre os dois → `ask_judge`. O limiar inferior é uma constante em `gate.py` com teste. Com `max_corrections ∈ {0, 1}` a faixa não é alcançável pelo runner: dois FAIL consecutivos só acontecem no segundo FAIL, que sempre para. Por isso, na v1, a faixa aparece só nas razões de `P_progresso` do `gate`, para a Marina interativa, e `decide` não a consulta (plano F3, decisão 1).
 
 **Segundo FAIL consecutivo.** Sempre `stop`, independentemente da juíza: continua exigindo decisão humana registrada no journal. Por isso `max_corrections` aceita só 0 ou 1 no schema v1; a aprovação do envelope não conta como essa decisão antecipada. Aceitar mais correções automáticas exige mudar essa regra explicitamente, fora deste plano.
 
@@ -205,7 +205,7 @@ Não existe ferramenta de aprovação. O perfil `marina.md` recebe as ferramenta
 - `judge`: saída válida, JSON inválido, opção não oferecida, timeout, cota esgotada.
 - `mcp_server`: JSON-RPC por pipes em processo; ausência de ferramenta de aprovação; `envelope_draft` apaga a aprovação; `run_start` recusa sem aprovação.
 - `hooks`: JSON no stdin, códigos de saída e mensagem para leitor/writer/receipt e para Stop ativo/inativo.
-- **Aceitação real (pendente até executada):** repositório descartável, envelope implementação → revisão → correção → revisão com o CLI real; um comando fora da allowlist que espera `attach`; interrupção do runner e retomada sem duplicação. Evidência registrada no checkpoint.
+- **Aceitação real (pendente até executada):** repositório descartável, envelope implementação → revisão → correção → revisão com o CLI real; um comando fora da allowlist negado e registrado no receipt; interrupção do runner e retomada sem duplicação. Evidência registrada no checkpoint.
 
 ## 4. Fases
 
