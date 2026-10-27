@@ -57,6 +57,12 @@ from scripts.state_lint import check_edge_compatibility
 # documented here as the one tunable constant of the whole predicate.
 RISKS_OVERLAP_THRESHOLD = 0.5
 
+# Below this ratio two rounds' findings count as progress; between it and
+# RISKS_OVERLAP_THRESHOLD lies the gray zone (spec 3.3, "Faixa cinzenta").
+# Only reported in P_progresso's reasons for now: with max_corrections <= 1
+# the runner never reaches a second consecutive FAIL it could act on.
+RISKS_OVERLAP_LOWER_THRESHOLD = 0.25
+
 
 @dataclasses.dataclass
 class GateResult:
@@ -189,15 +195,36 @@ def check_p0(
 # --------------------------------------------------------------------------
 
 
+def risks_overlap_ratio(previous: list[str], new: list[str]) -> float | None:
+    """|intersection| / |union| of two rounds' normalized risk titles, or
+    `None` when either round reported none (nothing to compare)."""
+
+    prev_set, new_set = set(previous), set(new)
+    if not prev_set or not new_set:
+        return None
+    return len(prev_set & new_set) / len(prev_set | new_set)
+
+
+def classify_overlap(ratio: float | None) -> str:
+    """"no_progress" at or above RISKS_OVERLAP_THRESHOLD, "gray" from
+    RISKS_OVERLAP_LOWER_THRESHOLD up to it, "progress" below (or `None`)."""
+
+    if ratio is None or ratio < RISKS_OVERLAP_LOWER_THRESHOLD:
+        return "progress"
+    if ratio >= RISKS_OVERLAP_THRESHOLD:
+        return "no_progress"
+    return "gray"
+
+
 def risks_overlap_substantially(previous: list[str], new: list[str]) -> bool:
     """True iff `previous`/`new` (already-normalized risk titles) share
     "the same findings" per plan §6.1 — no new evidence between rounds."""
 
-    prev_set, new_set = set(previous), set(new)
-    if not prev_set or not new_set:
-        return False
-    ratio = len(prev_set & new_set) / len(prev_set | new_set)
-    return ratio >= RISKS_OVERLAP_THRESHOLD
+    return classify_overlap(risks_overlap_ratio(previous, new)) == "no_progress"
+
+
+def _format_ratio(ratio: float | None) -> str:
+    return "n/a" if ratio is None else f"{ratio:.2f}"
 
 
 def find_fail_review_chain(doc: StateDoc, reviewer_nn: int) -> list[Assignment]:
@@ -239,20 +266,30 @@ def evaluate_p_progresso(doc: StateDoc, *, reviewer_nn: int, user_decided: bool)
         return GateResult(True, [])
 
     latest, previous = chain[0], chain[1]
-    if risks_overlap_substantially(previous.receipt_summary.risks_digest, latest.receipt_summary.risks_digest):
+    ratio = risks_overlap_ratio(previous.receipt_summary.risks_digest, latest.receipt_summary.risks_digest)
+    band = classify_overlap(ratio)
+    if band == "no_progress":
         return GateResult(
             False,
             [
                 f"no progress: risks_digest of nn={latest.nn} substantially overlaps nn={previous.nn}'s "
-                "(same findings, no new evidence) — offer `analisa` instead of `corrige`"
+                f"(overlap ratio {_format_ratio(ratio)}: same findings, no new evidence) "
+                "— offer `analisa` instead of `corrige`"
             ],
         )
     if not user_decided:
+        if band == "gray":
+            overlap = (
+                f"overlap ratio {_format_ratio(ratio)} is in the gray zone "
+                f"[{RISKS_OVERLAP_LOWER_THRESHOLD:g}, {RISKS_OVERLAP_THRESHOLD:g})"
+            )
+        else:
+            overlap = f"overlap ratio {_format_ratio(ratio)} indicates progress"
         return GateResult(
             False,
             [
                 f"second consecutive FAIL in this chain (nn={latest.nn}); an explicit user decision "
-                "must be recorded in the journal before `corrige` is allowed again"
+                f"must be recorded in the journal before `corrige` is allowed again; {overlap}"
             ],
         )
     return GateResult(True, [])

@@ -9,7 +9,10 @@ dependency; stdlib only.
 Not a general-purpose TOML emitter: it walks a plain nested dict built by
 `scripts.state.model.StateDoc.to_raw()` and infers table shape from
 Python types only (dict -> sub-table, list-of-dict -> array of tables,
-anything else -> scalar or scalar array). Round-trip correctness (this
+anything else -> scalar or scalar array). Keys that are not bare TOML keys
+(e.g. the absolute paths used as `[envelope.branches]` keys) are written
+as quoted basic strings, both in `key = value` lines and in headers.
+Round-trip correctness (this
 writer's output re-parsed by `tomllib` yields an equal data structure) is
 covered by tests/test_toml_write.py and tests/test_state_model.py, not
 byte-for-byte text equality with any particular source file.
@@ -18,6 +21,9 @@ byte-for-byte text equality with any particular source file.
 from __future__ import annotations
 
 import datetime
+import re
+
+_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def dumps(doc: dict) -> str:
@@ -53,20 +59,24 @@ def _write_table_body(lines: list[str], table: dict, path: tuple[str, ...]) -> N
             scalars.append((key, value))
 
     for key, value in scalars:
-        lines.append(f"{key} = {_format_value(value)}")
+        lines.append(f"{_format_key(key)} = {_format_value(value)}")
 
     for key, value in subtables:
-        header = ".".join((*path, key))
+        header = ".".join(_format_key(k) for k in (*path, key))
         lines.append("")
         lines.append(f"[{header}]")
         _write_table_body(lines, value, (*path, key))
 
     for key, value in array_tables:
-        header = ".".join((*path, key))
+        header = ".".join(_format_key(k) for k in (*path, key))
         for item in value:
             lines.append("")
             lines.append(f"[[{header}]]")
             _write_table_body(lines, item, (*path, key))
+
+
+def _format_key(key: str) -> str:
+    return key if _BARE_KEY_RE.match(key) else _format_string(key)
 
 
 def _format_value(value: object) -> str:
