@@ -431,7 +431,10 @@ def build_view(
     alive = pid is not None and pid_alive(pid)
     deadline = None
     if env is not None and started is not None:
-        deadline = started + datetime.timedelta(seconds=env_mod.parse_duration(env.max_duration))
+        try:
+            deadline = started + datetime.timedelta(seconds=env_mod.parse_duration(env.max_duration))
+        except env_mod.EnvelopeError:
+            deadline = None  # an unvalidated draft; `marina go` refuses it anyway
     current, is_next = _current(slots, doc)
     # Without an envelope (the manual procedure) the latest open node is still shown.
     open_nodes = [a for a in doc.assignments if a.state not in TERMINAL_STATES]

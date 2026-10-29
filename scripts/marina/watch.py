@@ -77,6 +77,7 @@ class _Source:
         self.sessions: list[dict] | None = None
         self.sessions_at = self.history_at = -float("inf")
         self.history: list[StateDoc] = []
+        self.last_lines: list[str] = []
 
     def view(self) -> progress.View:
         t = self.deps.monotonic()
@@ -90,6 +91,19 @@ class _Source:
         )
 
 
+    def lines(self, width: int) -> list[str]:
+        """The rendered screen; while state.toml is unreadable (a writer
+        mid-write, a malformed draft) the last good screen plus a warning."""
+
+        try:
+            self.last_lines = progress.render(self.view(), width)
+        except (StateError, OSError, ValueError) as exc:
+            if not self.last_lines:
+                return [f"marina watch: não consegui ler o estado: {exc}"[:width]]
+            return [*self.last_lines, f"aviso: estado ilegível agora, mostrando a última leitura ({exc})"[:width]]
+        return self.last_lines
+
+
 def _loop(screen, source: _Source) -> int:  # pragma: no cover - needs a real terminal
     import curses
 
@@ -98,7 +112,7 @@ def _loop(screen, source: _Source) -> int:  # pragma: no cover - needs a real te
     notice = ""
     while True:
         height, width = screen.getmaxyx()
-        lines = progress.render(source.view(), max(width - 1, 20))
+        lines = source.lines(max(width - 1, 20))
         if notice:
             lines.append(notice)
         screen.erase()
@@ -130,8 +144,9 @@ def run_watch(
 
     source = _Source(Path(state_path), Path(kit_root), deps, manager_interval)
     if once or not isatty():
-        print("\n".join(progress.render(source.view(), max(deps.terminal_width(), 40))), file=stdout)
-        return 0
+        lines = source.lines(max(deps.terminal_width(), 40))
+        print("\n".join(lines), file=stdout)
+        return 0 if source.last_lines else 1
     import curses  # pragma: no cover - needs a real terminal
 
     try:  # pragma: no cover

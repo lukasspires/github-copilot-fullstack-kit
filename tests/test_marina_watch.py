@@ -90,3 +90,42 @@ class WatchOnceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnreadableStateTests(unittest.TestCase):
+    """Review finding E: a malformed envelope or a state.toml caught mid-write
+    must never crash the view with a traceback."""
+
+    def test_once_with_unreadable_state_reports_and_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit, state_path = _fixture(tmp)
+            state_path.write_text("schema = 1\n[task\n", encoding="utf-8")
+            out = io.StringIO()
+            code = watch.run_watch(state_path, kit_root=kit, once=True, stdout=out, isatty=lambda: True,
+                                   manager_interval=10, deps=_deps(tmp))
+        self.assertEqual(code, 1)
+        self.assertIn("não consegui ler o estado", out.getvalue())
+
+    def test_malformed_max_duration_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit, state_path = _fixture(tmp)
+            doc = st.read_state(state_path)
+            doc.envelope["max_duration"] = "1d"
+            st.write_state(state_path, doc)
+            (state_path.parent / ".marina-run.lock").write_text('{"pid": 1, "started_at": "2026-10-28T21:00:00+00:00"}',
+                                                                encoding="utf-8")
+            out = io.StringIO()
+            code = watch.run_watch(state_path, kit_root=kit, once=True, stdout=out, isatty=lambda: True,
+                                   manager_interval=10, deps=_deps(tmp))
+        self.assertEqual(code, 0)
+        self.assertIn("marina · t1", out.getvalue())
+
+    def test_source_keeps_last_screen_when_state_turns_unreadable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit, state_path = _fixture(tmp)
+            source = watch._Source(state_path, kit, _deps(tmp), 10)
+            first = source.lines(100)
+            state_path.write_text("half written [", encoding="utf-8")
+            second = source.lines(100)
+        self.assertEqual(second[: len(first)], first)
+        self.assertIn("aviso:", second[-1])
