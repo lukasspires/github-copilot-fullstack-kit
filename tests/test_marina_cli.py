@@ -223,13 +223,19 @@ class GoCliTests(unittest.TestCase):
 
     def _go(self, kit: Path, *extra: str, tty: bool = True):
         out, err, spawns = io.StringIO(), io.StringIO(), []
+        self.watched = []
 
         def spawn(argv, cwd, log_path):
             spawns.append((list(argv), cwd, log_path))
             return 4321
 
+        def open_watch(state_path, kit_root):
+            self.watched.append((state_path, kit_root))
+            return 0
+
         code = cli.main(["go", "demo", "t1", "--kit-root", str(kit), "--grace", "0", *extra],
-                        stdin=io.StringIO(""), stdout=out, stderr=err, isatty=lambda: tty, spawn=spawn)
+                        stdin=io.StringIO(""), stdout=out, stderr=err, isatty=lambda: tty, spawn=spawn,
+                        open_watch=open_watch)
         return code, out.getvalue(), err.getvalue(), spawns
 
     def test_go_spawns_run_with_envelope_duration(self):
@@ -269,6 +275,31 @@ class GoCliTests(unittest.TestCase):
             self.assertEqual((code, spawns), (1, []))
             self.assertIn("interactive terminal", err)
 
+    def test_go_opens_watch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            self.assertEqual(self._go(kit)[0], 0)
+            self.assertEqual(self.watched, [(_state_path(kit), kit)])
+
+    def test_go_no_watch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            self.assertEqual(self._go(kit, "--no-watch")[0], 0)
+            self.assertEqual(self.watched, [])
+
+    def test_cli_watch_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(cli.watch, "default_watch_deps") as deps:
+                deps.return_value = cli.watch.WatchDeps(
+                    list_sessions=lambda: [], now=lambda: NOW, monotonic=lambda: 0.0, pid_alive=lambda pid: False,
+                    projects_root=Path(tmp), terminal_width=lambda: 100)
+                code = cli.main(["watch", "demo", "t1", "--kit-root", str(kit), "--once"], stdin=io.StringIO(""),
+                                stdout=out, stderr=err, isatty=lambda: True)
+            self.assertEqual(code, 0, err.getvalue())
+            self.assertIn("marina · t1", out.getvalue())
+
     def test_go_bad_options(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = _fake_kit(tmp)
@@ -288,7 +319,7 @@ class BinWrapperTests(unittest.TestCase):
                 [str(BIN), "--help"], cwd=tmp, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
             )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        for command in ("approve", "go", "run", "status", "stop", "mcp"):
+        for command in ("approve", "go", "watch", "run", "status", "stop", "mcp"):
             self.assertIn(command, proc.stdout)
 
     def test_bin_wrapper_refuses_without_tty(self):

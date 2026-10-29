@@ -16,6 +16,9 @@ Subcommands:
   (`envelope.approve_on_dispatch`, with a Ctrl-C grace period) and starts
   `marina run` detached; with a live run it only reports it, and never
   re-approves under a running run.
+- `watch <project> <task> [--once]` (F8): the read-only terminal view of
+  the task (scripts/marina/watch.py); `go` opens it after dispatching
+  unless `--no-watch`.
 - `mcp` (F5): the stdio MCP server for interactive Marina
   (scripts/marina/mcp_server.py); stdout carries only JSON-RPC.
 """
@@ -31,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
-from scripts.marina import envelope, hooks, mcp_server, runner
+from scripts.marina import envelope, hooks, mcp_server, runner, watch
 from scripts.state import StateError, read_state
 
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
@@ -57,11 +60,15 @@ def _parser() -> argparse.ArgumentParser:
     go.add_argument("--max-duration", default=None, help="defaults to the envelope's max_duration")
     go.add_argument("--notify-cmd", default=None, help="command run once per entry into waiting_approval")
     go.add_argument("--grace", type=float, default=10.0, help="seconds to cancel with Ctrl-C before approving")
+    go.add_argument("--no-watch", action="store_true", help="do not open `marina watch` afterwards")
+    watch_cmd = commands.add_parser("watch", help="read-only terminal view of a task's run")
+    watch_cmd.add_argument("--once", action="store_true", help="print one snapshot and exit")
+    watch_cmd.add_argument("--manager-interval", type=float, default=10.0, help="seconds between manager polls")
     status = commands.add_parser("status", help="show a task's lock, envelope and nodes")
     stop = commands.add_parser("stop", help="ask a running `marina run` to stop at its next iteration")
     mcp = commands.add_parser("mcp", help="serve the MCP stdio server for interactive Marina")
     mcp.add_argument("--kit-root", default=str(_DEFAULT_KIT_ROOT))
-    for sub in (approve, go, run, status, stop):
+    for sub in (approve, go, watch_cmd, run, status, stop):
         sub.add_argument("project")
         sub.add_argument("task")
         sub.add_argument("--kit-root", default=str(_DEFAULT_KIT_ROOT))
@@ -148,6 +155,7 @@ def _run_run(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO, deps: 
 def _run_go(
     args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO, isatty: Callable[[], bool],
     spawn: Callable[[list[str], Path, Path], int], sleep: Callable[[float], None],
+    open_watch: Callable[[Path, Path], int],
 ) -> int:
     state_path = _state_path(args, stderr)
     if state_path is None:
@@ -167,7 +175,7 @@ def _run_go(
     if pid is not None:
         print(f"marina go: run already in progress (pid {pid}); `marina status {args.project} {args.task}`",
               file=stdout)
-        return 0
+        return 0 if args.no_watch else open_watch(state_path, kit_root)
     try:
         code = envelope.approve_on_dispatch(
             state_path, kit_root=kit_root, stdout=stdout, stderr=stderr, isatty=isatty,
@@ -184,9 +192,25 @@ def _run_go(
     log = task_dir / runner.LOG_NAME
     pid = spawn(argv, kit_root, log)
     print(f"marina go: marina run started, pid {pid}; log {log}", file=stdout)
-    print(f"follow it with `marina status {args.project} {args.task}`; stop it with "
-          f"`marina stop {args.project} {args.task}`", file=stdout)
-    return 0
+    print(f"follow it with `marina status {args.project} {args.task}` or `marina watch {args.project} "
+          f"{args.task}`; stop it with `marina stop {args.project} {args.task}`", file=stdout)
+    return 0 if args.no_watch else open_watch(state_path, kit_root)
+
+
+def _run_watch(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO, isatty: Callable[[], bool]) -> int:
+    state_path = _state_path(args, stderr)
+    if state_path is None:
+        return 1
+    if not args.manager_interval > 0:
+        print("marina watch: --manager-interval must be > 0", file=stderr)
+        return 1
+    try:
+        return watch.run_watch(state_path, kit_root=Path(args.kit_root), once=args.once, stdout=stdout,
+                               isatty=isatty, manager_interval=args.manager_interval,
+                               deps=watch.default_watch_deps())
+    except (StateError, OSError) as exc:
+        print(f"marina watch: {exc}", file=stderr)
+        return 1
 
 
 def _run_status(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO) -> int:
@@ -223,6 +247,7 @@ def main(
     deps: runner.RunnerDeps | None = None,
     spawn: Callable[[list[str], Path, Path], int] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    open_watch: Callable[[Path, Path], int] | None = None,
 ) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -238,15 +263,19 @@ def main(
         return mcp_server.serve(stdin, stdout, kit_root=Path(args.kit_root), deps=mcp_server.default_mcp_deps())
     if args.command == "run":
         return _run_run(args, stdout=stdout, stderr=stderr, deps=deps)
+    if isatty is None:
+        isatty = lambda: stdin.isatty() and stdout.isatty()  # noqa: E731
     if args.command == "go":
-        if isatty is None:
-            isatty = lambda: stdin.isatty() and stdout.isatty()  # noqa: E731
+        if open_watch is None:
+            def open_watch(state_path: Path, kit_root: Path) -> int:
+                return watch.run_watch(state_path, kit_root=kit_root, once=False, stdout=stdout, isatty=isatty,
+                                       manager_interval=10.0, deps=watch.default_watch_deps())
         return _run_go(args, stdout=stdout, stderr=stderr, isatty=isatty, spawn=spawn or runner.spawn_detached,
-                       sleep=sleep)
+                       sleep=sleep, open_watch=open_watch)
+    if args.command == "watch":
+        return _run_watch(args, stdout=stdout, stderr=stderr, isatty=isatty)
     if args.command == "status":
         return _run_status(args, stdout=stdout, stderr=stderr)
     if args.command == "stop":
         return _run_stop(args, stdout=stdout, stderr=stderr)
-    if isatty is None:
-        isatty = lambda: stdin.isatty() and stdout.isatty()  # noqa: E731
     return _run_approve(args, stdin=stdin, stdout=stdout, stderr=stderr, isatty=isatty)
