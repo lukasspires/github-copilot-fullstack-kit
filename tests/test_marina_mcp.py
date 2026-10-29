@@ -478,7 +478,7 @@ class ActionToolTests(unittest.TestCase):
     def test_default_spawn_detaches(self):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "marina-run.log"
-            with mock.patch.object(mcp_server.subprocess, "Popen") as popen:
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
                 popen.return_value.pid = 77
                 pid = mcp_server.default_mcp_deps().spawn(["python3", "x"], Path(tmp), log)
             self.assertEqual(pid, 77)

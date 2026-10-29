@@ -687,3 +687,110 @@ class HelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FRONT = "/abs/front"
+API_ALLOW = [f"Bash(mvn -f {TARGET}/pom.xml test)"]
+FRONT_ALLOW = [f"Bash(npm --prefix {FRONT} test)"]
+BOTH = {TARGET: "feat/x", FRONT: "feat/x"}
+
+
+def multi_env(**overrides) -> env_mod.Envelope:
+    """Two stages, two roles, each with its own target and allowlist (F7)."""
+
+    values = {
+        "targets": [TARGET, FRONT],
+        "branches": dict(BOTH),
+        "allowlist": [f"Bash(git -C {TARGET} diff *)", f"Bash(git -C {FRONT} diff *)"],
+        "stages": [
+            {"role": ROLE, "handoff": "01-h.md", "targets": [TARGET], "allowlist": list(API_ALLOW)},
+            {"role": "angular", "handoff": "02-h.md", "targets": [FRONT], "allowlist": list(FRONT_ALLOW)},
+        ],
+    }
+    values.update(overrides)
+    return make_env(**values)
+
+
+class MultiRoleTests(unittest.TestCase):
+    """F7: `encadeia` between stages of different roles, each node with its stage's scope."""
+
+    def _decide(self, g: Graph, **env_overrides) -> Decision:
+        return dm.decide(g.doc, multi_env(**env_overrides), obs_ok(branches=dict(BOTH)))
+
+    @staticmethod
+    def _api(g: Graph, role: str, edge: str, pred: int, state: str = "accepted", **kw) -> int:
+        return g.add(role, edge, pred, state, targets=[TARGET], allowlist=list(API_ALLOW), **kw)
+
+    @staticmethod
+    def _front(g: Graph, role: str, edge: str, pred: int, state: str = "accepted", **kw) -> int:
+        return g.add(role, edge, pred, state, targets=[FRONT], allowlist=list(FRONT_ALLOW), **kw)
+
+    def test_empty_graph_launches_stage_one_with_its_scope(self):
+        d = self._decide(Graph())
+        self.assertEqual(d.node, NodeSpec(ROLE, "implementação", "inicia", 0, (TARGET,), tuple(API_ALLOW), 1))
+
+    def test_multi_role_review_uses_stage_scope(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        d = self._decide(g)
+        self.assertEqual(d.node, NodeSpec("reviewer", "revisão", "revisa", 1, (TARGET,), tuple(API_ALLOW), 1))
+
+    def test_multi_role_pass_opens_encadeia_with_next_stage_scope(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        d = self._decide(g)
+        self.assertEqual(d.node, NodeSpec("angular", "implementação", "encadeia", 1, (FRONT,), tuple(FRONT_ALLOW), 2))
+
+    def test_same_role_still_opens_prossegue(self):
+        g = Graph()
+        g.writer()
+        g.review(1, "PASS")
+        self.assertEqual(decide(g).node.edge, "prossegue")
+
+    def test_multi_role_fail_corrects_with_stage_role_and_scope(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        self._front(g, "angular", "encadeia", 1)
+        self._front(g, "reviewer", "revisa", 3, verdict="FAIL")
+        d = self._decide(g)
+        self.assertEqual(d.node, NodeSpec("angular", "correção", "corrige", 4, (FRONT,), tuple(FRONT_ALLOW), 2))
+
+    def test_last_stage_pass_is_done(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        self._front(g, "angular", "encadeia", 1)
+        self._front(g, "reviewer", "revisa", 3, verdict="PASS")
+        self.assertEqual(self._decide(g).kind, "done")
+
+    def test_encadeia_node_with_wrong_targets_is_graph_outside_envelope(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        g.add("angular", "encadeia", 1, "working", targets=[TARGET], allowlist=list(FRONT_ALLOW))
+        d = self._decide(g)
+        self.assertEqual(d.kind, "stop")
+        self.assertTrue(d.reason.startswith("graph_outside_envelope"), d.reason)
+
+    def test_stage_allowlist_mismatch_is_envelope_changed(self):
+        g = Graph()
+        g.add(ROLE, "inicia", 0, "working", targets=[TARGET], allowlist=list(FRONT_ALLOW))
+        self.assertEqual(self._decide(g).reason, "envelope_changed")
+
+    def test_encadeia_with_the_same_role_is_graph_outside_envelope(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        self._front(g, ROLE, "encadeia", 1, "working")
+        self.assertTrue(self._decide(g).reason.startswith("graph_outside_envelope"))
+
+    def test_replacement_of_encadeia_follows_its_stage(self):
+        g = Graph()
+        self._api(g, ROLE, "inicia", 0)
+        self._api(g, "reviewer", "revisa", 1, verdict="PASS")
+        self._front(g, "angular", "encadeia", 1, "receipt_missing")
+        self._front(g, "angular", "substitui", 3, type_="implementação")
+        d = self._decide(g)
+        self.assertEqual(d.node, NodeSpec("reviewer", "revisão", "revisa", 4, (FRONT,), tuple(FRONT_ALLOW), 2))

@@ -95,6 +95,29 @@ class RenderTests(unittest.TestCase):
         self.assertIsNotNone(reviewer)
         self._valid(handoff_gen.render_stage_handoff(self.doc, nxt, kit_root=KIT_ROOT, template_text=TEMPLATE), nxt)
 
+    def test_stage_and_correction_handoffs_carry_contracts_and_expected_io(self):
+        # F9: marina-plan templates add Contracts and Expected inputs/outputs; the
+        # specialist must receive them, and the handoff must stay valid.
+        extra = TEMPLATE + ("\n## Contracts\n\n`GET /search` keeps its v1 payload.\n\n"
+                            "## Expected inputs\n\n- the v1 schema\n\n## Expected outputs\n\n- `SearchController.java`\n")
+        text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=extra)
+        for fragment in ("**Contracts:**", "keeps its v1 payload", "**Expected inputs:**", "the v1 schema",
+                         "**Expected outputs:**", "`SearchController.java`"):
+            self.assertIn(fragment, text)
+        self._valid(text, self.writer)
+        self.assertEqual(handoff_sync.synchronize(text, self.writer, KIT_ROOT), (text, []))
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        reviewer.receipt_summary = st.ReceiptSummary(status="done", verdict="FAIL", profile_ok=True)
+        fix = _add(self.doc, "java-backend", "correção", "corrige", reviewer.nn)
+        text = handoff_gen.render_correction_handoff(self.doc, fix, kit_root=KIT_ROOT, template_text=extra)
+        self.assertIn("keeps its v1 payload", text)
+        self._valid(text, fix)
+
+    def test_stage_handoff_without_extra_sections_is_unchanged(self):
+        text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        self.assertNotIn("**Contracts:**", text)
+        self.assertNotIn("**Expected", text)
+
     def test_stage_handoff_copies_template_sections(self):
         text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
         for fragment in ("Implementar o endpoint de busca.", "`src/main/java/`", "`GET /search` responde 200.",

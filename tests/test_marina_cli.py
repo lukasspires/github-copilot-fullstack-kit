@@ -218,6 +218,97 @@ class McpCliTests(unittest.TestCase):
             self.assertEqual(ids, [1, 2])
 
 
+class GoCliTests(unittest.TestCase):
+    """F7: `marina go` approves on dispatch and starts `marina run` detached."""
+
+    def _go(self, kit: Path, *extra: str, tty: bool = True):
+        out, err, spawns = io.StringIO(), io.StringIO(), []
+        self.watched = []
+
+        def spawn(argv, cwd, log_path):
+            spawns.append((list(argv), cwd, log_path))
+            return 4321
+
+        def open_watch(state_path, kit_root):
+            self.watched.append((state_path, kit_root))
+            return 0
+
+        code = cli.main(["go", "demo", "t1", "--kit-root", str(kit), "--grace", "0", *extra],
+                        stdin=io.StringIO(""), stdout=out, stderr=err, isatty=lambda: tty, spawn=spawn,
+                        open_watch=open_watch)
+        return code, out.getvalue(), err.getvalue(), spawns
+
+    def test_go_spawns_run_with_envelope_duration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            code, out, err, spawns = self._go(kit)
+            self.assertEqual(code, 0, err)
+            argv, cwd, log = spawns[0]
+            self.assertEqual(argv, runner.run_argv(kit, "demo", "t1", interval=30, max_duration="8h", notify_cmd=None))
+            self.assertEqual((cwd, log), (kit, _state_path(kit).parent / runner.LOG_NAME))
+            self.assertIsNotNone(env_mod.envelope_from_doc(state.read_state(_state_path(kit))).approval)
+            self.assertIn("pid 4321", out)
+            self.assertIn("marina status demo t1", out)
+
+    def test_go_passes_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            code, _, err, spawns = self._go(kit, "--interval", "5", "--max-duration", "1h", "--notify-cmd", "x y")
+            self.assertEqual(code, 0, err)
+            self.assertEqual(spawns[0][0], runner.run_argv(kit, "demo", "t1", interval=5, max_duration="1h",
+                                                           notify_cmd="x y"))
+
+    def test_go_with_live_lock_does_not_spawn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            lock = _state_path(kit).parent / runner.LOCK_NAME
+            lock.write_text(json.dumps({"pid": os.getpid(), "started_at": "x"}), encoding="utf-8")
+            code, out, _, spawns = self._go(kit)
+            self.assertEqual((code, spawns), (0, []))
+            self.assertIn("already in progress", out)
+            self.assertIsNone(env_mod.envelope_from_doc(state.read_state(_state_path(kit))).approval)
+
+    def test_go_refusal_does_not_spawn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            code, _, err, spawns = self._go(kit, tty=False)
+            self.assertEqual((code, spawns), (1, []))
+            self.assertIn("interactive terminal", err)
+
+    def test_go_opens_watch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            self.assertEqual(self._go(kit)[0], 0)
+            self.assertEqual(self.watched, [(_state_path(kit), kit)])
+
+    def test_go_no_watch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            self.assertEqual(self._go(kit, "--no-watch")[0], 0)
+            self.assertEqual(self.watched, [])
+
+    def test_cli_watch_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(cli.watch, "default_watch_deps") as deps:
+                deps.return_value = cli.watch.WatchDeps(
+                    list_sessions=lambda: [], now=lambda: NOW, monotonic=lambda: 0.0, pid_alive=lambda pid: False,
+                    projects_root=Path(tmp), terminal_width=lambda: 100)
+                code = cli.main(["watch", "demo", "t1", "--kit-root", str(kit), "--once"], stdin=io.StringIO(""),
+                                stdout=out, stderr=err, isatty=lambda: True)
+            self.assertEqual(code, 0, err.getvalue())
+            self.assertIn("marina · t1", out.getvalue())
+
+    def test_go_bad_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            for extra in (("--interval", "0"), ("--max-duration", "1d"), ("--grace", "-1")):
+                with self.subTest(extra=extra):
+                    code, _, _, spawns = self._go(kit, *extra)
+                    self.assertEqual((code, spawns), (1, []))
+
+
 class BinWrapperTests(unittest.TestCase):
     def test_bin_wrapper_is_executable(self):
         self.assertTrue(os.access(BIN, os.X_OK))
@@ -228,7 +319,7 @@ class BinWrapperTests(unittest.TestCase):
                 [str(BIN), "--help"], cwd=tmp, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
             )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        for command in ("approve", "run", "status", "stop", "mcp"):
+        for command in ("approve", "go", "watch", "run", "status", "stop", "mcp"):
             self.assertIn(command, proc.stdout)
 
     def test_bin_wrapper_refuses_without_tty(self):
