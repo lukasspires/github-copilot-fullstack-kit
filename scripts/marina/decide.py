@@ -18,6 +18,11 @@ Choices from docs/plano-f3-envelope-e-decide-2026-10.md:
 - decision 1: the gray zone of `gate` is not consulted; with
   `max_corrections <= 1` a second consecutive FAIL always stops first.
 
+F7 (docs/plano-f7-envelope-multipapel-e-envio-2026-10.md): the next stage
+opens with `encadeia` when its role differs from the previous stage's, and
+every node carries `envelope.node_scope` for its stage and edge; a node
+whose targets or allowlist differ from that scope is outside the envelope.
+
 F6 finding A4 (part 1): a `substitui` node that Marina opens for a node in
 `receipt_missing`/`receipt_invalid` stands for that node (same role, type,
 targets and allowlist, once per node), so the run can resume. The runner
@@ -29,13 +34,18 @@ from __future__ import annotations
 import dataclasses
 
 from scripts.gate import find_fail_review_chain
-from scripts.marina.envelope import Envelope
+from scripts.marina.envelope import WRITER_STAGE_EDGES, Envelope, node_scope
 from scripts.state import Assignment, ReceiptSummary, StateDoc, effective_edge
 
-EDGE_TYPE = {"inicia": "implementação", "prossegue": "implementação", "revisa": "revisão", "corrige": "correção"}
-_WRITER_EDGES = ("inicia", "prossegue", "corrige")
+EDGE_TYPE = {
+    "inicia": "implementação", "prossegue": "implementação", "encadeia": "implementação",
+    "revisa": "revisão", "corrige": "correção",
+}
+_WRITER_EDGES = (*WRITER_STAGE_EDGES, "corrige")
 # Edge of the predecessor each expansion edge may follow (spec 3.2, decision 9).
-_PREDECESSOR_EDGES = {"prossegue": ("inicia", "prossegue"), "revisa": _WRITER_EDGES, "corrige": ("revisa",)}
+_PREDECESSOR_EDGES = {
+    "prossegue": WRITER_STAGE_EDGES, "encadeia": WRITER_STAGE_EDGES, "revisa": _WRITER_EDGES, "corrige": ("revisa",),
+}
 _REPLACEABLE = ("receipt_missing", "receipt_invalid")
 _RUNNING = ("launched", "working")
 _CLOSED_BY_STATUS = {
@@ -108,11 +118,20 @@ def stage_of(doc: StateDoc, nn: int) -> int:
     a = doc.get_assignment(nn)
     if a.edge == "inicia":
         return 1
-    if a.edge == "prossegue":
+    if a.edge in ("prossegue", "encadeia"):
         return stage_of(doc, a.predecessor) + 1
     if a.edge in ("revisa", "corrige", "substitui"):
         return stage_of(doc, a.predecessor)
     raise ValueError(f"nn={nn}: edge {a.edge!r} is outside the envelope's expansion")
+
+
+def expected_scope(doc: StateDoc, env: Envelope, a: Assignment) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(targets, allowlist) node `a` must carry; a replacement keeps its original's.
+
+    Raises `ValueError` (from `stage_of`) for a node outside the expansion.
+    """
+
+    return node_scope(env, stage_of(doc, a.nn), effective_edge(doc, a))
 
 
 def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
@@ -133,8 +152,6 @@ def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
             replacements.setdefault(a.predecessor, a.nn)
     seen: set[int] = set()
     for a in nodes:
-        if tuple(a.targets) != env.targets:
-            errors.append(f"nn={a.nn}: targets {a.targets} differ from the envelope's")
         shape = _shape_error(doc, a, by_nn)
         if shape:
             errors.append(shape)
@@ -146,14 +163,22 @@ def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
             if a.predecessor in seen:
                 errors.append(f"nn={a.nn}: nn={a.predecessor} was already replaced")
             seen.add(a.predecessor)
-            if tuple(a.allowlist) != env.allowlist:
-                errors.append(f"nn={a.nn}: substitui allowlist differs from the envelope's")
         edge = effective_edge(doc, a)
         stage = stage_of(doc, a.nn)
         if stage > len(env.stages):
             errors.append(f"nn={a.nn}: stage {stage} is beyond the envelope's {len(env.stages)} stage(s)")
-        elif edge in _WRITER_EDGES and a.role != env.stages[stage - 1].role:
+            continue
+        targets, allowlist = node_scope(env, stage, edge)
+        if tuple(a.targets) != targets:
+            errors.append(f"nn={a.nn}: targets {a.targets} differ from stage {stage}'s {list(targets)}")
+        if a.edge == "substitui" and tuple(a.allowlist) != allowlist:
+            errors.append(f"nn={a.nn}: substitui allowlist differs from the replaced node's scope")
+        if edge in _WRITER_EDGES and a.role != env.stages[stage - 1].role:
             errors.append(f"nn={a.nn}: role {a.role!r} differs from stage {stage}'s {env.stages[stage - 1].role!r}")
+        elif edge == "encadeia" and a.role == env.stages[stage - 2].role:
+            errors.append(f"nn={a.nn}: encadeia needs a role different from stage {stage - 1}'s; use prossegue")
+        elif edge == "prossegue" and a.role != env.stages[stage - 2].role:
+            errors.append(f"nn={a.nn}: prossegue needs stage {stage - 1}'s role; use encadeia")
         if edge == "revisa" and a.role != "reviewer":
             errors.append(f"nn={a.nn}: revisa must use the reviewer role, got {a.role!r}")
     return errors
@@ -200,13 +225,22 @@ def _stage_opener(doc: StateDoc, stage: int) -> Assignment:
     """The stage's opening writer; a replacement comes after the node it replaces."""
 
     openers = [a for a in doc.assignments
-               if effective_edge(doc, a) in ("inicia", "prossegue") and stage_of(doc, a.nn) == stage]
+               if effective_edge(doc, a) in WRITER_STAGE_EDGES and stage_of(doc, a.nn) == stage]
     return max(openers, key=lambda a: a.nn)
 
 
 def _launch(env: Envelope, *, role: str, edge: str, predecessor: int, stage: int) -> Decision:
-    node = NodeSpec(role, EDGE_TYPE[edge], edge, predecessor, env.targets, env.allowlist, stage)
+    targets, allowlist = node_scope(env, stage, edge)
+    node = NodeSpec(role, EDGE_TYPE[edge], edge, predecessor, targets, allowlist, stage)
     return Decision("launch", node=node)
+
+
+def _next_stage(env: Envelope, *, predecessor: int, stage: int) -> Decision:
+    """Open stage `stage + 1`: `prossegue` for the same role, `encadeia` for another (F7)."""
+
+    role = env.stages[stage].role
+    edge = "prossegue" if role == env.stages[stage - 1].role else "encadeia"
+    return _launch(env, role=role, edge=edge, predecessor=predecessor, stage=stage + 1)
 
 
 # --------------------------------------------------------------------------
@@ -218,14 +252,13 @@ def _after_writer(doc: StateDoc, env: Envelope, writer: Assignment) -> Decision:
     stage = stage_of(doc, writer.nn)
     if effective_edge(doc, writer) == "corrige" or env.review == "each_stage" or stage == len(env.stages):
         return _launch(env, role="reviewer", edge="revisa", predecessor=writer.nn, stage=stage)
-    return _launch(env, role=env.stages[stage].role, edge="prossegue", predecessor=writer.nn, stage=stage + 1)
+    return _next_stage(env, predecessor=writer.nn, stage=stage)
 
 
 def _after_pass(doc: StateDoc, env: Envelope, reviewer: Assignment) -> Decision:
     stage = stage_of(doc, reviewer.nn)
     if env.review == "each_stage" and stage < len(env.stages):
-        opener = _stage_opener(doc, stage)
-        return _launch(env, role=env.stages[stage].role, edge="prossegue", predecessor=opener.nn, stage=stage + 1)
+        return _next_stage(env, predecessor=_stage_opener(doc, stage).nn, stage=stage)
     return Decision("done")
 
 
@@ -323,12 +356,14 @@ def decide(doc: StateDoc, env: Envelope | None, obs: Observations) -> Decision:
     if (
         obs.envelope_sha256 != env.approval.sha256
         or any(obs.branches.get(t) != env.branches[t] for t in env.targets)
-        or (current is not None and tuple(current.allowlist) != env.allowlist)
     ):
         return _stop("envelope_changed")
     errors = graph_errors(doc, env)
     if errors:
         return _stop(f"graph_outside_envelope: {errors[0]}")
+    # The graph is valid here, so `stage_of` terminates for every node.
+    if current is not None and tuple(current.allowlist) != expected_scope(doc, env, current)[1]:
+        return _stop("envelope_changed")
     if current is None:
         return _launch(env, role=env.stages[0].role, edge="inicia", predecessor=0, stage=1)
     return _decide_for_state(doc, env, current, obs)

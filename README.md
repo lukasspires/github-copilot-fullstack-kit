@@ -118,16 +118,17 @@ Se a plataforma não conseguir abrir sessões visíveis, a sessão principal ass
 
 ## Cadeias sem supervisão (`marina run`)
 
-Uma cadeia implementação → revisão → correção → revisão pode avançar sem você presente, mas só dentro de um **envelope** que você aprovou antes. O envelope é a tabela opcional `[envelope]` do `state.toml` da tarefa e contém:
+Uma cadeia implementação → revisão → correção → revisão pode avançar sem você presente, mas só dentro de um **envelope** que você enviou. Rodar `bin/marina go <projeto> <tarefa>` num terminal seu é a aprovação do plano inteiro. O envelope é a tabela opcional `[envelope]` do `state.toml` da tarefa e contém:
 
-- os estágios (um papel writer, o mesmo em todos, cada um com um template `stage-<n>-handoff-template.md` contendo `Objective`, `Write scope` e `Acceptance criteria`);
+- os estágios, cada um com um papel writer e um template `stage-<n>-handoff-template.md` contendo `Objective`, `Write scope` e `Acceptance criteria`. Cada estágio pode ter `targets` e `allowlist` próprios. Papéis diferentes entre estágios são ligados pela aresta `encadeia` e exigem `review = "each_stage"`;
 - os alvos com o branch esperado de cada um;
-- a allowlist, que vale também para reviewers e correções;
+- a allowlist do envelope, que vale para os estágios sem allowlist própria e, com `review = "final"`, para a revisão e a correção;
 - o modo de revisão (`each_stage` ou `final`), `max_corrections` (0 ou 1), `max_duration`, `judge_max_calls` e o que fazer com `PASS_WITH_RISKS` (`accept`, `judge` ou `stop`).
 
 | Comando | O que faz |
 |---|---|
-| `bin/marina approve <projeto> <tarefa>` | Mostra o envelope e grava a aprovação depois que você digita o slug da tarefa; só funciona num terminal interativo. O hash cobre o envelope e os templates: editar qualquer um invalida a aprovação. |
+| `bin/marina go <projeto> <tarefa>` | **Enviar é aprovar:** mostra o plano, espera 10 s (Ctrl-C cancela sem gravar nada), grava a aprovação do plano inteiro e dispara `marina run` destacado. Só funciona num terminal interativo. Com uma run viva, só avisa e não aprova de novo. O hash cobre o envelope e os templates: editar qualquer um invalida a aprovação. |
+| `bin/marina approve <projeto> <tarefa>` | Aprova sem executar, depois que você digita o slug da tarefa; só funciona num terminal interativo. |
 | `bin/marina run <projeto> <tarefa> --interval 30 --max-duration 2h` | Abre, um nó por vez, só os nós da expansão do envelope, pelo caminho de sempre (Git Gate entre writers, `gate`, `state add`, handoff gerado, preflight, `launch_claude`). Para com o motivo numa seção gerada do checkpoint: envelope ou branch alterado, mudança alheia entre writers, segundo `FAIL` seguido, falha da juíza, receipt ausente ou inválido, limite de tempo, erro, Ctrl-C ou `marina stop`. |
 | `bin/marina status <projeto> <tarefa>` | Trava, aprovação do envelope e nós da tarefa. |
 | `bin/marina stop <projeto> <tarefa>` | Pede ao `run` que pare na próxima iteração. |
@@ -351,7 +352,7 @@ Scripts neutros de plataforma, Python 3 stdlib (`tomllib` exige ≥ 3.11), sem d
 | `python3 scripts/launch_claude.py --state … --nn … --kit-root …` | Monta e lança o `claude --bg` do nó (`dontAsk`, regras de escrita derivadas, Stop hook, `--strict-mcp-config`) | `state.toml` |
 | `python3 scripts/status_claude.py …` / `python3 scripts/watch_claude.py …` | Observa o manager nativo e, com `--state`/`--nn`, registra a transição observada | `state.toml` (só com `--state`) |
 | `python3 scripts/receipt_lint.py <receipt> --handoff <handoff>` | Valida a forma de um receipt e extrai `risks_digest` | nada |
-| `bin/marina approve\|run\|status\|stop\|mcp` | Envelope aprovado, `marina run` e o servidor MCP (ver [Cadeias sem supervisão](#cadeias-sem-supervisão-marina-run)) | só o diretório da tarefa |
+| `bin/marina go\|approve\|run\|status\|stop\|mcp` | Envelope aprovado, `marina run` e o servidor MCP (ver [Cadeias sem supervisão](#cadeias-sem-supervisão-marina-run)) | só o diretório da tarefa |
 | `bin/marina hook require-receipt` | Stop hook das sessões em background: impede o encerramento sem receipt válido | nada |
 
 Estes scripts formalizam checks mecânicos. Roteamento, mérito de receipt e decisões de correção continuam sendo julgamento da Marina, exceto dentro de um envelope que você aprovou, onde o `marina run` segue a expansão do envelope e para em tudo que fuja dela. Nenhum script responde aprovações nativas.

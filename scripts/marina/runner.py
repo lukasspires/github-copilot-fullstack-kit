@@ -22,6 +22,9 @@ Choices from docs/plano-f4-runner-e-juiza-2026-10.md:
 - decision 6: the runner's own `state add`/`state set` use `by = "marina-run"`;
 - decision 7: only a `wait` sleeps;
 - decision 8: `marina stop` writes `.marina-run.stop`, checked each iteration.
+- F7: `git-after-NN.txt` and the Git gate cover every envelope target, in
+  envelope order, so a foreign change in another stage's target also stops
+  the run; `run_argv`/`spawn_detached` are shared by `run_start` and `go`.
 
 It never answers a native approval (it may run `--notify-cmd`), never
 retries an `uncertain` launch, never archives or deletes sessions, and
@@ -42,6 +45,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -60,7 +64,7 @@ LOCK_NAME = ".marina-run.lock"
 STOP_NAME = ".marina-run.stop"
 LOG_NAME = "marina-run.log"
 JUDGE_LEDGER = "judge-calls.jsonl"
-_WRITER_EDGES = ("inicia", "prossegue", "corrige")
+_WRITER_EDGES = (*env_mod.WRITER_STAGE_EDGES, "corrige")
 _OBSERVED_STATES = ("launched", "working", "waiting_approval")
 _BEFORE_ACCEPTANCE = ("finished", "receipt_received", "receipt_validated")
 
@@ -170,6 +174,39 @@ def _acquire_lock(task_dir: Path, doc: StateDoc, *, recover: bool, deps: RunnerD
             stream.write(payload)
         return path
     raise RunRefused(f"could not acquire {path}")  # pragma: no cover - loop always returns or raises
+
+
+def live_lock_pid(task_dir: Path, *, pid_alive: Callable[[int], bool] | None = None) -> int | None:
+    """The pid of a live `marina run` holding the task's lock, else None."""
+
+    pid_alive = pid_alive or _pid_alive
+    try:
+        pid = json.loads((Path(task_dir) / LOCK_NAME).read_text(encoding="utf-8")).get("pid")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return pid if isinstance(pid, int) and pid_alive(pid) else None
+
+
+def run_argv(kit_root: Path, project: str, task: str, *, interval: float, max_duration: str,
+             notify_cmd: str | None) -> list[str]:
+    """The detached `marina run` command line, as `run_start` and `marina go` spawn it."""
+
+    argv = [sys.executable, str(Path(kit_root) / "scripts" / "marina" / "__main__.py"), "run", project, task,
+            "--interval", f"{interval:g}", "--max-duration", max_duration]
+    if notify_cmd:
+        argv += ["--notify-cmd", notify_cmd]
+    return argv + ["--kit-root", str(kit_root)]
+
+
+def spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> int:
+    """Start `argv` in its own session, stdin closed, output appended to `log_path`."""
+
+    with Path(log_path).open("a", encoding="utf-8") as log:
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    return proc.pid
 
 
 def request_stop(state_path: Path) -> bool:
@@ -299,13 +336,14 @@ class _Run:
             return "absent" if not matches else None
         return None
 
-    def _write_git_after(self, doc: StateDoc) -> None:
+    def _write_git_after(self, doc: StateDoc, env: env_mod.Envelope | None) -> None:
         current = max(doc.assignments, key=lambda a: a.nn, default=None)
         if current is None or mode_for_role(current.role) != "writer" or current.state not in _BEFORE_ACCEPTANCE:
             return
         path = self.task_dir / f"git-after-{current.nn:02d}.txt"
         if not path.exists():
-            path.write_text("".join(self.deps.git_snapshot(t) for t in current.targets), encoding="utf-8")
+            targets = env.targets if env is not None else current.targets
+            path.write_text("".join(self.deps.git_snapshot(t) for t in targets), encoding="utf-8")
 
     def _observations(self, doc: StateDoc, env: env_mod.Envelope | None, manager_match: str | None) -> Observations:
         if env is None:
@@ -389,7 +427,7 @@ class _Run:
                                      judge_answer=(question, answer.decision))
         return decide(doc, env, follow)
 
-    def _git_gate(self, doc: StateDoc, node: NodeSpec) -> str:
+    def _git_gate(self, doc: StateDoc, env: env_mod.Envelope) -> str:
         writers = [a for a in doc.assignments if effective_edge(doc, a) in _WRITER_EDGES and a.state == "accepted"]
         if not writers:
             return ""
@@ -397,7 +435,7 @@ class _Run:
         path = self.task_dir / f"git-after-{previous.nn:02d}.txt"
         if not path.exists():
             return "git_after_missing"
-        current = "".join(self.deps.git_snapshot(t) for t in node.targets)
+        current = "".join(self.deps.git_snapshot(t) for t in env.targets)
         return "" if current == path.read_text(encoding="utf-8") else "foreign_change"
 
     def _render(self, doc: StateDoc, env: env_mod.Envelope, a: Assignment, node: NodeSpec) -> str:
@@ -414,7 +452,7 @@ class _Run:
         """Open one node; returns a stop reason, or "" once launch_claude ran."""
 
         if mode_for_role(node.role) == "writer":
-            refused = self._git_gate(doc, node)
+            refused = self._git_gate(doc, env)
             if refused:
                 return refused
         result = gate.evaluate_gate(
@@ -459,7 +497,7 @@ class _Run:
             return Decision("stop", reason="envelope_invalid")
         manager_match = self._observe(doc)
         doc = read_state(self.state_path)
-        self._write_git_after(doc)
+        self._write_git_after(doc, env)
         obs = self._observations(doc, env, manager_match)
         decision = decide(doc, env, obs)
         if decision.kind == "ask_judge":

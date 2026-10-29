@@ -176,6 +176,8 @@ class NegativeInvariantTests(unittest.TestCase):
 class ProssegueEdgeTests(unittest.TestCase):
     """edge=prossegue: next block of the same work after an accepted writer."""
 
+    edge = "prossegue"
+
     def _doc(self, *, pred_state="accepted", role="node-backend", type_="implementação", predecessor=1):
         task = st.Task(
             project="demo-project", slug="demo-task", title="Demo", phase="delivery",
@@ -199,7 +201,7 @@ class ProssegueEdgeTests(unittest.TestCase):
         for to_state in path:
             st.set_state(doc, first.nn, to_state, by="test", at=AT)
         st.add_assignment(
-            doc, role=role, type_=type_, edge="prossegue", predecessor=predecessor,
+            doc, role=role, type_=type_, edge=self.edge, predecessor=predecessor,
             targets=["/tmp/kit"], at=AT,
         )
         return doc
@@ -233,6 +235,38 @@ class ProssegueEdgeTests(unittest.TestCase):
         errors = self._errors(self._doc(predecessor=0))
         self.assertEqual(len(errors), 1)
         self.assertIn("edge=prossegue requires predecessor in accepted, got None", errors[0])
+
+
+class EncadeiaEdgeTests(ProssegueEdgeTests):
+    """edge=encadeia (F7): the next stage's writer of another role after an accepted writer."""
+
+    edge = "encadeia"
+
+    def test_accepted_same_role_same_type_passes(self):
+        errors = self._errors(self._doc())
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("edge=encadeia requires a role different from predecessor", errors[0])
+
+    def test_different_role_fails(self):
+        self.assertEqual(state_lint.check_edge_compatibility(self._doc(role="angular")), [])
+
+    def test_different_type_fails(self):
+        errors = self._errors(self._doc(role="angular", type_="correção"))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("edge=encadeia requires type 'implementação'", errors[0])
+
+    def test_predecessor_not_accepted_fails(self):
+        for state in ("closed_pending", "receipt_validated"):
+            with self.subTest(state=state):
+                errors = self._errors(self._doc(pred_state=state, role="angular"))
+                self.assertEqual(len(errors), 1)
+                self.assertIn("edge=encadeia requires a writer predecessor in accepted", errors[0])
+                self.assertIn(repr(state), errors[0])
+
+    def test_without_predecessor_fails(self):
+        errors = self._errors(self._doc(predecessor=0, role="angular"))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("edge=encadeia requires a writer predecessor in accepted, got None", errors[0])
 
 
 class MainCliTests(unittest.TestCase):
