@@ -262,6 +262,20 @@ class ViewTests(unittest.TestCase):
         self.assertIn("envelope: nenhum", "\n".join(lines))
         self.assertEqual([a.nn for a in view.extra], [1, 2])
 
+    def test_manual_task_shows_its_live_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = self._fixture(tmp, envelope=False)
+            doc = st.read_state(state_path)
+            doc.get_assignment(2).native.id = "d88f2825"
+            st.write_state(state_path, doc)
+            session = {"id": "d88f2825", "name": "t1 — reviewer — 02 — revisão", "cwd": "/kit", "kind": "background",
+                       "state": "working", "status": "busy", "sessionId": "abc-123"}
+            view = self._view(state_path, sessions=[session])
+            text = "\n".join(pg.render(view, 120))
+        self.assertEqual(view.live.nn, 2)
+        self.assertIn("02 reviewer · working", text)
+        self.assertIn("manager: working", text)
+
     def test_render_lists_slots_and_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
             view = self._view(self._fixture(tmp), sessions=[])

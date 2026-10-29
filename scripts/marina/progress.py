@@ -86,6 +86,7 @@ class View:
     stats: dict[tuple[str, str], Stats]
     current: Slot | None
     current_is_next: bool
+    live: Assignment | None
     manager_note: str
     activity: tuple[str, datetime.datetime] | None
     last_log: str
@@ -432,10 +433,14 @@ def build_view(
     if env is not None and started is not None:
         deadline = started + datetime.timedelta(seconds=env_mod.parse_duration(env.max_duration))
     current, is_next = _current(slots, doc)
+    # Without an envelope (the manual procedure) the latest open node is still shown.
+    open_nodes = [a for a in doc.assignments if a.state not in TERMINAL_STATES]
+    live = current.node if current is not None and current.node is not None else (
+        max(open_nodes, key=lambda a: a.nn) if open_nodes else None)
     manager_note, activity = "manager indisponível", None
     if sessions is not None:
         manager_note = "manager: sem sessão para o nó atual"
-        node = current.node if current is not None else None
+        node = live
         if node is not None and node.native.id:
             match = [s for s in sessions if s.get("id") == node.native.id]
             if match:
@@ -453,7 +458,7 @@ def build_view(
         slug=doc.task.slug, title=doc.task.title, envelope_note=envelope_note, now=now, run_pid=pid,
         run_alive=alive, run_started=started, deadline=deadline, slots=slots, extra=extra,
         counts=counts(slots), estimate=estimate(slots, stats, now), stats=stats, current=current,
-        current_is_next=is_next, manager_note=manager_note, activity=activity, last_log=_last_log(task_dir),
+        current_is_next=is_next, live=live, manager_note=manager_note, activity=activity, last_log=_last_log(task_dir),
         io=io, judge=_judge(task_dir, env),
     )
 
@@ -557,14 +562,15 @@ def render(view: View, width: int) -> list[str]:
         lines.append(f"── {title} " + "─" * max(56 - len(title), 4))
         lines += [f"   {a.nn:02d} {a.role} {a.edge} {a.state}" for a in view.extra]
     lines.append("── agora " + "─" * 51)
-    current = view.current
-    if current is None:
-        lines.append("nenhuma etapa ativa ou prevista")
-    elif view.current_is_next:
+    current, node = view.current, view.live
+    if node is not None:
+        _, _, elapsed = node_window(node, view.now)
+        lines.append(f"{node.nn:02d} {node.role} · {node.state} · {_clock(elapsed)} · {node.title} · "
+                     f"id {node.native.id or '—'}")
+    elif current is not None and view.current_is_next:
         lines.append(f"próxima etapa: {current.role} · {current.type} · estágio {current.stage}")
     else:
-        node = current.node
-        lines.append(f"{node.nn:02d} {node.role} · {node.title} · id {node.native.id or '—'}")
+        lines.append("nenhuma etapa ativa ou prevista")
     activity = view.manager_note
     if view.activity is not None:
         text, at = view.activity
