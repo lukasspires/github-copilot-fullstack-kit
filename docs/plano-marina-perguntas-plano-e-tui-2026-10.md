@@ -169,8 +169,8 @@ A TUI não muda nada na execução. A única escrita é a tecla `s`, que equival
 | Fase | Entrega | Plano |
 |---|---|---|
 | **F7** | Escopo por estágio, aresta `encadeia`, `marina go` (aprovação no envio) e regras do kit atualizadas | [plano-f7-envelope-multipapel-e-envio-2026-10.md](plano-f7-envelope-multipapel-e-envio-2026-10.md) |
-| **F8** | `marina watch`: modelo de progresso puro, `--once`, `curses`, atividade atual; o `go` abre o visor | a escrever depois da F7 |
-| **F9** | Skills `marina-intake` e `marina-plan`, templates de `brief.md` e `plan.md`, `task-execution` apontando para elas | a escrever |
+| **F8** | `marina watch`: modelo de progresso puro, `--once`, `curses`, atividade atual; o `go` abre o visor | [plano-f8-marina-watch-2026-10.md](plano-f8-marina-watch-2026-10.md) |
+| **F9** | Skills `marina-intake` e `marina-plan`, templates de `brief.md` e `plan.md`, `task-execution` apontando para elas | [plano-f9-skills-perguntas-e-plano-2026-10.md](plano-f9-skills-perguntas-e-plano-2026-10.md) |
 | **F10** | Opcional: `marina open-terminal` (kitty ou alacritty via `$TERMINAL`) | só se o usuário pedir |
 | **F11** | Aceitação real no repositório descartável `marina-acc`, com fluxo completo e dois papéis | a escrever |
 

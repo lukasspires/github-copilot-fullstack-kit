@@ -104,7 +104,7 @@ Distribuído sob a [Apache License 2.0](LICENSE). Os resumos históricos de norm
 
 ## Como uma tarefa é executada
 
-1. **Intake** — Marina consolida objetivo, critérios, decisões posteriores e evidência; distingue o que foi pedido, o que foi decidido depois, o que foi relatado como feito e o que foi verificado. Estado, percentual ou link de MR **não** provam conclusão.
+1. **Intake** — numa tarefa nova, Marina faz uma rodada de perguntas, uma por vez (skill `marina-intake`, adaptada do brainstorming do Superpowers), até você confirmar o `brief.md`, ou até você dizer "pode seguir". Daí sai o `plan.md` com os estágios e o envelope (skill `marina-plan`), que você dispara com `bin/marina go`. Marina consolida objetivo, critérios, decisões posteriores e evidência; distingue o que foi pedido, o que foi decidido depois, o que foi relatado como feito e o que foi verificado. Estado, percentual ou link de MR **não** provam conclusão.
 2. **Checkpoint** — Para toda tarefa com atribuições, Marina mantém `.agent-state/<projeto>/tasks/<tarefa>/checkpoint.md` (ignorado pelo Git), com decisões, autorizações, evidências, checks e a próxima ação. `<projeto>` é o slug do repositório-alvo ou, em tarefas com vários repositórios, do diretório de workspace que os agrupa; assim o estado de projetos diferentes nunca se mistura. Antes de redescobrir, Marina lê a memória estável em `.agent-state/<projeto>/project/` (repositórios, arquitetura, convenções, integrações), que só ela escreve. Anexos e PDFs da tarefa ficam em `tasks/<tarefa>/inputs/`.
 3. **Roteamento** — Uma correção simples vai para um único especialista. O `architect` entra para decisões de arquitetura, contratos compartilhados, migrations e backfills; o `reviewer` revisa automaticamente autorização, contratos públicos, integridade de dados, migrations e operações críticas.
 4. **Handoff** — Antes de cada atribuição, Marina escreve `.agent-state/<projeto>/tasks/<tarefa>/<NN>-<papel>-handoff.md` com objetivo, perfil absoluto, roots, instruções do alvo a ler, escopo de escrita, contratos, evidência (inclusive o que já está em `project/`), critérios, checks descobertos e allowlist.
@@ -187,6 +187,12 @@ Skills são procedimentos carregados sob demanda. No Claude Code, Marina e os es
   ```text
   /task-execution Retomar a tarefa #5678. Checkpoint em .agent-state/agenda/tasks/redmine-5678/checkpoint.md. Verificar o estado atual dos repositórios antes de qualquer nova sessão.
   ```
+
+#### `marina-intake` e `marina-plan`
+
+- **O que fazem:** `marina-intake` é a rodada de perguntas com que a Marina abre uma tarefa nova: uma pergunta por mensagem, resumos parciais, recon só de leitura e um `brief.md` que você confirma. `marina-plan` transforma o brief em `plan.md`, nos templates de estágio (com entradas e saídas esperadas, mostradas pelo `marina watch`) e no envelope. A Marina então entrega o comando `bin/marina go <projeto> <tarefa>`.
+- **De onde vêm:** adaptadas do brainstorming e do writing-plans do Superpowers 7.0.0. A execução continua sendo a do kit: sessões visíveis, um writer por vez, sem commit sem autorização.
+- **Quando usar:** toda tarefa nova enviada à Marina. Retomadas e tarefas limitadas a um especialista pulam a rodada.
 
 #### `quality-gate`
 

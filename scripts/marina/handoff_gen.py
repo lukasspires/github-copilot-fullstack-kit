@@ -22,6 +22,8 @@ from scripts.state import Assignment, StateDoc, reviewed_writer
 
 TEMPLATE_REQUIRED = ("Objective", "Write scope", "Acceptance criteria")
 TEMPLATE_OPTIONAL = ("Target instructions to read explicitly", "Checks and workdir", "Preservation")
+# marina-plan sections (F9): carried into the handoff's Context, shown by `marina watch`.
+TEMPLATE_CONTEXT = ("Contracts", "Expected inputs", "Expected outputs")
 CANONICAL_NAME_RE = re.compile(r"^\d{2}-[a-z0-9-]+-(handoff|receipt)\.md$")
 
 _DEFAULT_PRESERVATION = (
@@ -104,6 +106,12 @@ def _render(
     return "\n\n".join(sections) + "\n"
 
 
+def _with_template_context(context: str, template_text: str) -> str:
+    extras = [f"**{heading}:**\n\n{body}" for heading in TEMPLATE_CONTEXT
+              if (body := _body(template_text, heading))]
+    return "\n\n".join([context, *extras])
+
+
 def _template_kwargs(template_text: str) -> dict[str, str]:
     return {
         "write_scope": _body(template_text, "Write scope"),
@@ -114,13 +122,13 @@ def _template_kwargs(template_text: str) -> dict[str, str]:
 
 
 def render_stage_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, template_text: str) -> str:
-    """Handoff for an `inicia`/`prossegue` writer, from its stage template."""
+    """Handoff for an `inicia`/`prossegue`/`encadeia` writer, from its stage template."""
 
     context = f"Envelope stage writer opened by `marina run` (edge {a.edge}, predecessor nn={a.predecessor:02d})."
     return _render(
         doc, a, kit_root=kit_root,
         objective=_body(template_text, "Objective"),
-        context=context,
+        context=_with_template_context(context, template_text),
         acceptance=_body(template_text, "Acceptance criteria"),
         **_template_kwargs(template_text),
     )
@@ -174,7 +182,7 @@ def render_correction_handoff(doc: StateDoc, a: Assignment, *, kit_root: Path, t
     return _render(
         doc, a, kit_root=kit_root,
         objective=f"Corrigir os achados do nn={reviewer.nn:02d} (FAIL).",
-        context=context,
+        context=_with_template_context(context, template_text),
         acceptance=acceptance,
         **_template_kwargs(template_text),
     )
