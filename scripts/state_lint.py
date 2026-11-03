@@ -126,6 +126,18 @@ def check_edge_compatibility(doc: StateDoc) -> list[str]:
                         f"nn={a.nn}: edge=prossegue requires the same type as predecessor "
                         f"{pred.nn} ({pred.type!r}), got {a.type!r}"
                     )
+        elif a.edge == "encadeia":
+            if pred is None or pred.mode != "writer" or pred.state != "accepted":
+                got = pred.state if pred else None
+                errors.append(f"nn={a.nn}: edge=encadeia requires a writer predecessor in accepted, got {got!r}")
+            else:
+                if a.role == pred.role:
+                    errors.append(
+                        f"nn={a.nn}: edge=encadeia requires a role different from predecessor {pred.nn} "
+                        f"({pred.role!r}); the same role uses prossegue"
+                    )
+                if a.type != "implementação" or pred.type != "implementação":
+                    errors.append(f"nn={a.nn}: edge=encadeia requires type 'implementação' on both nodes")
         elif a.edge == "substitui":
             if pred is None or pred.state not in _TERMINAL_WITHOUT_RESULT:
                 got = pred.state if pred else None

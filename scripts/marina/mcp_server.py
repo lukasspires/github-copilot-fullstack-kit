@@ -13,7 +13,7 @@ Tools (docs/plano-f5-servidor-mcp-2026-10.md):
   `state_reserve`, `launch_node`, `run_start` (refuses without a valid
   approval), `run_stop`.
 
-No tool approves an envelope: only `marina approve` on a TTY does. The kit
+No tool approves an envelope: only `marina go` or `marina approve` on a TTY does. The kit
 root is the server's own and never a tool argument; `project`/`task` must
 fullmatch `^[a-z0-9-]+$`. The four tools that change state refuse while a
 `marina run` holds the task lock (plan decision 6). Writes stay inside the
@@ -30,7 +30,6 @@ import datetime
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -58,13 +57,8 @@ class McpDeps:
     runner_deps: Callable[[Path], runner.RunnerDeps]
 
 
-def _spawn_detached(argv: list[str], cwd: Path, log_path: Path) -> int:
-    with log_path.open("a", encoding="utf-8") as log:
-        proc = subprocess.Popen(
-            argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    return proc.pid
+# Kept under its F5 name; the implementation is shared with `marina go` (F7).
+_spawn_detached = runner.spawn_detached
 
 
 def default_mcp_deps() -> McpDeps:
@@ -260,7 +254,7 @@ class Server:
         if errors:
             raise ToolError("envelope is invalid: " + "; ".join(errors))
         if env.approval is None:
-            raise ToolError("envelope is not approved; the user runs `marina approve` in a terminal")
+            raise ToolError("envelope is not approved; the user runs `marina go` (or `marina approve`) in a terminal")
         if env_mod.compute_hash(env, task_dir=task_dir) != env.approval.sha256:
             raise ToolError("envelope or a stage template changed since approval (hash differs); approve again")
         return env
@@ -351,7 +345,7 @@ class Server:
         state_path = self._state_path(project, task)
         self._refuse_if_running(state_path)
         if "approval" in envelope:
-            raise ToolError("a draft never carries [envelope.approval]; only `marina approve` records it")
+            raise ToolError("a draft never carries [envelope.approval]; only `marina go` or `marina approve` records it")
         try:
             env = env_mod.parse_envelope(envelope)
         except env_mod.EnvelopeError as exc:
@@ -402,11 +396,8 @@ class Server:
             raise ToolError(str(exc)) from exc
         task_dir = state_path.parent
         self._approved_envelope(read_state(state_path), task_dir)
-        argv = [sys.executable, str(self.kit_root / "scripts" / "marina" / "__main__.py"), "run", project, task,
-                "--interval", f"{interval:g}", "--max-duration", max_duration]
-        if notify_cmd:
-            argv += ["--notify-cmd", notify_cmd]
-        argv += ["--kit-root", str(self.kit_root)]
+        argv = runner.run_argv(self.kit_root, project, task, interval=interval, max_duration=max_duration,
+                               notify_cmd=notify_cmd)
         log = task_dir / runner.LOG_NAME
         return {"pid": self.deps.spawn(argv, self.kit_root, log), "log": str(log)}
 

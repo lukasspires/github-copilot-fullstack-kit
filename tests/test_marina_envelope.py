@@ -47,14 +47,14 @@ def raw_envelope(**overrides) -> dict:
 class TaskFixture:
     """A temporary task directory with state.toml and one handoff."""
 
-    def __init__(self, tmp: str, *, envelope: dict | None = None, slug: str = "t1"):
+    def __init__(self, tmp: str, *, envelope: dict | None = None, slug: str = "t1", targets: list[str] | None = None):
         self.task_dir = Path(tmp) / ".agent-state" / "demo" / "tasks" / slug
         self.task_dir.mkdir(parents=True)
         self.state_path = self.task_dir / "state.toml"
         (self.task_dir / HANDOFF).write_text(TEMPLATE, encoding="utf-8")
         doc = state.init_state(
             self.state_path, project="demo", slug=slug, title="Demo task", kit_root=str(KIT_ROOT),
-            targets=[TARGET], at=NOW,
+            targets=targets or [TARGET], at=NOW,
         )
         doc.envelope = envelope
         state.write_state(self.state_path, doc)
@@ -143,12 +143,18 @@ class ValidateTests(unittest.TestCase):
                 self.assertEqual(len(errors), 1, errors)
                 self.assertIn(role, errors[0])
 
-    def test_stages_with_different_roles_refused(self):
+    def test_stages_with_different_roles_accepted_with_each_stage(self):
         with tempfile.TemporaryDirectory() as tmp:
             stages = [{"role": "java-backend", "handoff": HANDOFF}, {"role": "angular", "handoff": HANDOFF}]
-            errors = self._errors(tmp, stages=stages)
+            self.assertEqual(self._errors(tmp, stages=stages), [])
+
+    def test_multi_role_with_final_review_refused(self):
+        # A final FAIL could not tell which role corrects (spec 3.2, decision 2).
+        with tempfile.TemporaryDirectory() as tmp:
+            stages = [{"role": "java-backend", "handoff": HANDOFF}, {"role": "angular", "handoff": HANDOFF}]
+            errors = self._errors(tmp, stages=stages, review="final")
             self.assertEqual(len(errors), 1, errors)
-            self.assertIn("prossegue", errors[0])
+            self.assertIn("each_stage", errors[0])
 
     def test_canonical_template_name_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +244,109 @@ class ValidateTests(unittest.TestCase):
                 errors = self._errors(tmp, **overrides)
                 self.assertEqual(len(errors), 1, errors)
                 self.assertIn(next(iter(overrides)), errors[0])
+
+
+FRONT = "/abs/front"
+TWO_TARGETS = {"targets": [TARGET, FRONT], "branches": {TARGET: "feat/x", FRONT: "feat/x"}}
+
+
+def two_stage_raw(**overrides) -> dict:
+    raw = raw_envelope(
+        **TWO_TARGETS,
+        allowlist=[f"Bash(git -C {TARGET} diff *)", f"Bash(git -C {FRONT} diff *)"],
+        stages=[
+            {"role": "java-backend", "handoff": HANDOFF, "targets": [TARGET],
+             "allowlist": [f"Bash(mvn -f {TARGET}/pom.xml test)"]},
+            {"role": "angular", "handoff": HANDOFF, "targets": [FRONT],
+             "allowlist": [f"Bash(npm --prefix {FRONT} test)"]},
+        ],
+    )
+    raw.update(overrides)
+    return raw
+
+
+class StageScopeTests(unittest.TestCase):
+    def _errors(self, tmp: str, raw: dict) -> list[str]:
+        fx = TaskFixture(tmp, targets=[TARGET, FRONT])
+        env = env_mod.parse_envelope(raw)
+        return env_mod.validate_envelope(env, doc=fx.doc(), kit_root=KIT_ROOT, task_dir=fx.task_dir)
+
+    def _with_stage(self, index: int, **stage_overrides) -> dict:
+        raw = two_stage_raw()
+        raw["stages"][index].update(stage_overrides)
+        return raw
+
+    def test_stage_scope_round_trip(self):
+        raw = two_stage_raw()
+        env = env_mod.parse_envelope(raw)
+        self.assertEqual(env.stages[1].targets, (FRONT,))
+        self.assertEqual(env_mod.envelope_to_raw(env), raw)
+
+    def test_hash_unchanged_for_stage_without_scope(self):
+        # Envelopes approved before F7 must keep their hash.
+        env = env_mod.parse_envelope(raw_envelope())
+        self.assertEqual(set(env_mod.envelope_to_raw(env)["stages"][0]), {"role", "handoff"})
+
+    def test_bad_stage_scope_refused(self):
+        for stage in ({"role": "java-backend", "handoff": HANDOFF, "targets": TARGET},
+                      {"role": "java-backend", "handoff": HANDOFF, "allowlist": [1]},
+                      {"role": "java-backend", "handoff": HANDOFF, "surprise": []}):
+            with self.subTest(stage=stage), self.assertRaisesRegex(EnvelopeError, "stages"):
+                env_mod.parse_envelope(raw_envelope(stages=[stage]))
+
+    def test_valid_two_stage_envelope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._errors(tmp, two_stage_raw()), [])
+
+    def test_stage_targets_must_be_envelope_targets(self):
+        for targets, fragment in ((["/abs/elsewhere"], "not one of the envelope's targets"), ([], "at least one"),
+                                  ([TARGET, TARGET], "duplicates")):
+            with self.subTest(targets=targets), tempfile.TemporaryDirectory() as tmp:
+                errors = self._errors(tmp, self._with_stage(0, targets=targets))
+                self.assertTrue(any(fragment in e for e in errors), errors)
+
+    def test_stage_allowlist_must_name_a_stage_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            errors = self._errors(tmp, self._with_stage(0, allowlist=[f"Bash(npm --prefix {FRONT} test)"]))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("stages[0]", errors[0])
+        self.assertIn("names no target", errors[0])
+
+    def test_stage_allowlist_forbidden_rules_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            errors = self._errors(tmp, self._with_stage(1, allowlist=[f"Edit(/{FRONT}/**)"]))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("stages[1]", errors[0])
+
+    def test_stage_scope_and_node_scope(self):
+        env = env_mod.parse_envelope(two_stage_raw())
+        self.assertEqual(env_mod.stage_targets(env, 2), (FRONT,))
+        self.assertEqual(env_mod.stage_allowlist(env, 1), (f"Bash(mvn -f {TARGET}/pom.xml test)",))
+        stage2 = ((FRONT,), (f"Bash(npm --prefix {FRONT} test)",))
+        for edge in ("inicia", "prossegue", "encadeia", "revisa", "corrige"):
+            with self.subTest(edge=edge):
+                self.assertEqual(env_mod.node_scope(env, 2, edge), stage2)
+        final = env_mod.parse_envelope(raw_envelope())
+        whole = ((TARGET,), (f"Bash(mvn -f {TARGET}/pom.xml test)",))
+        self.assertEqual(env_mod.node_scope(final, 1, "inicia"), whole)
+
+    def test_final_review_uses_the_envelope_scope(self):
+        raw = two_stage_raw(review="final")
+        for stage in raw["stages"]:
+            stage["role"] = "java-backend"
+        env = env_mod.parse_envelope(raw)
+        whole = ((TARGET, FRONT), tuple(raw["allowlist"]))
+        self.assertEqual(env_mod.node_scope(env, 2, "revisa"), whole)
+        self.assertEqual(env_mod.node_scope(env, 2, "corrige"), whole)
+        self.assertEqual(env_mod.node_scope(env, 2, "prossegue")[0], (FRONT,))
+
+    def test_summary_lists_stage_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, targets=[TARGET, FRONT])
+            env = env_mod.parse_envelope(two_stage_raw())
+            text = env_mod.format_summary(env, fx.doc(), "c" * 64)
+        self.assertIn(f"targets: {FRONT}", text)
+        self.assertIn(f"Bash(npm --prefix {FRONT} test)", text)
 
 
 class HashTests(unittest.TestCase):
@@ -428,3 +537,84 @@ class ApproveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DispatchTests(unittest.TestCase):
+    """F7: running `marina go` on a TTY is the approval of the whole plan."""
+
+    def _dispatch(self, fx: TaskFixture, *, tty: bool = True, sleep=None, grace: float = 10):
+        out, err, slept = io.StringIO(), io.StringIO(), []
+        code = env_mod.approve_on_dispatch(
+            fx.state_path, kit_root=KIT_ROOT, stdout=out, stderr=err, isatty=lambda: tty, now=lambda: NOW,
+            sleep=sleep or slept.append, grace=grace,
+        )
+        return code, out.getvalue(), err.getvalue(), slept
+
+    def test_dispatch_records_approval_after_grace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            code, out, _, slept = self._dispatch(fx)
+            self.assertEqual((code, slept), (0, [10]))
+            env = env_mod.envelope_from_doc(fx.doc())
+            self.assertEqual(env.approval.sha256, env_mod.compute_hash(env, task_dir=fx.task_dir))
+            self.assertEqual(env.approval.at, NOW)
+            self.assertIn("stages:", out)
+            self.assertIn("Ctrl-C", out)
+            self.assertIn(f"approved on dispatch t1 sha256={env.approval.sha256}", out)
+
+    def test_dispatch_refuses_without_tty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            before = fx.state_path.read_bytes()
+            code, out, err, slept = self._dispatch(fx, tty=False)
+            self.assertEqual((code, out, slept), (1, "", []))
+            self.assertIn("requires an interactive terminal", err)
+            self.assertEqual(fx.state_path.read_bytes(), before)
+
+    def test_dispatch_interrupt_writes_nothing(self):
+        def interrupt(_seconds):
+            raise KeyboardInterrupt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            before = fx.state_path.read_bytes()
+            code, _, err, _ = self._dispatch(fx, sleep=interrupt)
+            self.assertEqual(code, 1)
+            self.assertIn("cancelled", err)
+            self.assertEqual(fx.state_path.read_bytes(), before)
+
+    def test_dispatch_already_approved_skips_grace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            self._dispatch(fx)
+            before = fx.state_path.read_bytes()
+            code, out, _, slept = self._dispatch(fx)
+            self.assertEqual((code, slept), (0, []))
+            self.assertIn("already approved", out)
+            self.assertEqual(fx.state_path.read_bytes(), before)
+
+    def test_dispatch_change_during_grace_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+
+            def edit(_seconds):
+                (fx.task_dir / HANDOFF).write_text(TEMPLATE + "\nedited\n", encoding="utf-8")
+
+            code, _, err, _ = self._dispatch(fx, sleep=edit)
+            self.assertEqual(code, 1)
+            self.assertIn("changed while waiting", err)
+            self.assertIsNone(env_mod.envelope_from_doc(fx.doc()).approval)
+
+    def test_dispatch_invalid_envelope_refused(self):
+        for envelope in (None, raw_envelope(review="never"), {"surprise": 1}):
+            with self.subTest(envelope=envelope), tempfile.TemporaryDirectory() as tmp:
+                fx = TaskFixture(tmp, envelope=envelope)
+                code, _, err, slept = self._dispatch(fx)
+                self.assertEqual((code, slept), (1, []))
+                self.assertIn("marina go", err)
+
+    def test_dispatch_with_zero_grace_does_not_sleep(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            code, _, _, slept = self._dispatch(fx, grace=0)
+            self.assertEqual((code, slept), (0, []))

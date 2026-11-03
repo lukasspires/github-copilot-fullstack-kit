@@ -37,7 +37,8 @@ TEMPLATE = (
 
 class World:
     def __init__(self, tmp: str, *, stages: int = 1, review: str = "each_stage", verdicts: dict | None = None,
-                 on_pass_with_risks: str = "judge", judge_max_calls: int = 1, max_corrections: int = 1):
+                 on_pass_with_risks: str = "judge", judge_max_calls: int = 1, max_corrections: int = 1,
+                 second_target: bool = False):
         self.kit = Path(tmp) / "kit"
         agents = self.kit / ".claude" / "agents"
         agents.mkdir(parents=True)
@@ -46,17 +47,21 @@ class World:
         (self.kit / "AGENTS.md").write_text("# kit\n", encoding="utf-8")
         self.target = Path(tmp) / "target"
         self.target.mkdir()
+        # F7: with `second_target`, stage 1 works in `target` and every later stage in `target2`.
+        self.target2 = Path(tmp) / "target2"
+        self.target2.mkdir()
+        targets = [str(self.target), str(self.target2)] if second_target else [str(self.target)]
         self.task_dir = self.kit / ".agent-state" / "demo" / "tasks" / "t1"
         self.task_dir.mkdir(parents=True)
         self.state_path = self.task_dir / "state.toml"
         for n in range(1, stages + 1):
             (self.task_dir / f"stage-{n}-handoff-template.md").write_text(TEMPLATE.format(n=n), encoding="utf-8")
         doc = st.init_state(self.state_path, project="demo", slug="t1", title="Demo", kit_root=str(self.kit),
-                            targets=[str(self.target)], at=AT)
+                            targets=targets, at=AT)
         raw = {
-            "targets": [str(self.target)],
-            "branches": {str(self.target): "feat/x"},
-            "allowlist": [f"Bash(test -d {self.target})"],
+            "targets": targets,
+            "branches": {t: "feat/x" for t in targets},
+            "allowlist": [f"Bash(test -d {t})" for t in targets],
             "review": review,
             "max_corrections": max_corrections,
             "max_duration": "8h",
@@ -64,6 +69,10 @@ class World:
             "on_pass_with_risks": on_pass_with_risks,
             "stages": [{"role": ROLE, "handoff": f"stage-{n}-handoff-template.md"} for n in range(1, stages + 1)],
         }
+        if second_target:
+            for n, stage in enumerate(raw["stages"], 1):
+                stage_target = targets[0] if n == 1 else targets[1]
+                stage.update(targets=[stage_target], allowlist=[f"Bash(test -d {stage_target})"])
         sha = env_mod.compute_hash(env_mod.parse_envelope(raw), task_dir=self.task_dir)
         raw["approval"] = {"at": AT, "sha256": sha}
         doc.envelope = raw
@@ -73,6 +82,7 @@ class World:
         self.verdicts = verdicts or {}
         self.after_receipt: dict[int, callable] = {}
         self.snapshot = "clean\n"
+        self.per_target: dict[str, str] = {}
         self.branch = "feat/x"
         self.clock = 0.0
         self.auto_finish = True
@@ -144,7 +154,7 @@ class World:
                 preflight.run_preflight, which=lambda c: f"/usr/bin/{c}", list_sessions=self.list_sessions,
                 git_status_diff=lambda t: "clean\n",
             ),
-            git_snapshot=lambda t: self.snapshot,
+            git_snapshot=lambda t: self.per_target.get(t, self.snapshot),
             git_branch=self.git_branch,
             judge=self.judge,
             notify=self.notified.append,
@@ -381,6 +391,30 @@ class SafetyTests(unittest.TestCase):
             result = w.run()
             self.assertEqual((result.outcome, result.reason, result.created), ("stop", "foreign_change", [1, 2]))
 
+    def test_git_after_covers_every_envelope_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, second_target=True, verdicts={2: "PASS"})
+            w.per_target = {str(w.target): "a\n", str(w.target2): "b\n"}
+            result = w.run()
+            self.assertEqual(result.outcome, "done", result.reason)
+            self.assertEqual(w.doc().get_assignment(1).targets, [str(w.target)])
+            self.assertEqual((w.task_dir / "git-after-01.txt").read_text(encoding="utf-8"), "a\nb\n")
+
+    def test_foreign_change_in_other_stage_target_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, second_target=True, verdicts={2: "PASS"})
+            w.after_receipt[2] = lambda: w.per_target.__setitem__(str(w.target2), "dirty\n")
+            result = w.run()
+            self.assertEqual((result.outcome, result.reason, result.created), ("stop", "foreign_change", [1, 2]))
+
+    def test_second_stage_opens_with_its_own_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, stages=2, second_target=True, verdicts={2: "PASS", 4: "PASS"})
+            self.assertEqual(w.run().outcome, "done")
+            third = w.doc().get_assignment(3)
+            self.assertEqual((third.edge, third.targets, third.allowlist),
+                             ("prossegue", [str(w.target2)], [f"Bash(test -d {w.target2})"]))
+
     def test_template_edited_mid_run_stops_before_launch(self):
         with tempfile.TemporaryDirectory() as tmp:
             w = World(tmp, verdicts={2: "PASS"})
@@ -600,3 +634,20 @@ class HelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LockHelperTests(unittest.TestCase):
+    def test_live_lock_pid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            self.assertIsNone(runner.live_lock_pid(task_dir, pid_alive=lambda pid: True))
+            (task_dir / runner.LOCK_NAME).write_text(json.dumps({"pid": 77, "started_at": "x"}), encoding="utf-8")
+            self.assertEqual(runner.live_lock_pid(task_dir, pid_alive=lambda pid: True), 77)
+            self.assertIsNone(runner.live_lock_pid(task_dir, pid_alive=lambda pid: False))
+            (task_dir / runner.LOCK_NAME).write_text("garbage", encoding="utf-8")
+            self.assertIsNone(runner.live_lock_pid(task_dir, pid_alive=lambda pid: True))
+
+    def test_run_argv(self):
+        argv = runner.run_argv(Path("/kit"), "demo", "t1", interval=30, max_duration="2h", notify_cmd=None)
+        self.assertEqual(argv[1:], ["/kit/scripts/marina/__main__.py", "run", "demo", "t1", "--interval", "30",
+                                    "--max-duration", "2h", "--kit-root", "/kit"])
