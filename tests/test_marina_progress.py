@@ -129,6 +129,15 @@ class FillTests(unittest.TestCase):
         slots, extra = pg.fill_slots(g.doc, make_env())
         self.assertEqual([a.nn for a in extra], [2])
 
+    def test_pre_envelope_analisa_is_not_extra(self):
+        g = Graph()
+        g.add("architect", "analisa", 0, type_="análise")
+        g.add("java-backend", "inicia", 0, "working")
+        slots, extra = pg.fill_slots(g.doc, make_env())
+        self.assertEqual(extra, [])
+        self.assertEqual(slots[0].node.nn, 2)
+        self.assertEqual(pg.counts(slots), (0, 2, 4))
+
 
 class EstimateTests(unittest.TestCase):
     def test_duration_stats_uses_observed_pairs_only(self):
@@ -236,14 +245,16 @@ class IoAndActivityTests(unittest.TestCase):
 
 
 class ViewTests(unittest.TestCase):
-    def _fixture(self, tmp: str, *, envelope: bool = True) -> Path:
+    def _fixture(self, tmp: str, *, envelope: bool = True, analysis: bool = False) -> Path:
         kit = Path(tmp) / "kit"
         task_dir = kit / ".agent-state" / "demo" / "tasks" / "t1"
         task_dir.mkdir(parents=True)
         (task_dir / "stage-1-handoff-template.md").write_text(TEMPLATE, encoding="utf-8")
         g = Graph()
-        g.add("java-backend", "inicia", 0)
-        g.add("reviewer", "revisa", 1, "working")
+        first = g.add("architect", "analisa", 0, type_="análise") if analysis else 0
+        w = g.add("java-backend", "inicia", 0)
+        g.add("reviewer", "revisa", w, "working")
+        self.assertEqual(first, 1 if analysis else 0)
         g.doc.task.kit_root = str(kit)
         if envelope:
             g.doc.envelope = env_mod.envelope_to_raw(make_env())
@@ -300,6 +311,32 @@ class ViewTests(unittest.TestCase):
             text = "\n".join(pg.render(self._view(state_path, sessions=[]), 100))
         self.assertIn("nada pendente", text)
         self.assertNotIn("fim provável", text)
+
+    def test_render_shows_pre_envelope_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._view(self._fixture(tmp, analysis=True), sessions=[])
+            lines = pg.render(view, 100)
+        text = "\n".join(lines)
+        self.assertEqual(([a.nn for a in view.pre_envelope], view.extra), ([1], []))
+        self.assertIn("1/2", text)
+        section = next(i for i, line in enumerate(lines) if "análise pré-envelope" in line)
+        self.assertLess(section, next(i for i, line in enumerate(lines) if "etapas planejadas" in line))
+        self.assertEqual(lines[section + 1], "   01 architect analisa accepted")
+        self.assertNotIn("fora da expansão", text)
+
+    def test_render_without_prefix_has_no_pre_envelope_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._view(self._fixture(tmp), sessions=[])
+            text = "\n".join(pg.render(view, 100))
+        self.assertEqual(view.pre_envelope, [])
+        self.assertNotIn("pré-envelope", text)
+
+    def test_render_without_envelope_keeps_analysis_in_task_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._view(self._fixture(tmp, envelope=False, analysis=True))
+            text = "\n".join(pg.render(view, 100))
+        self.assertEqual(([a.nn for a in view.extra], view.pre_envelope), ([1, 2, 3], []))
+        self.assertNotIn("pré-envelope", text)
 
     def test_render_manager_unavailable(self):
         with tempfile.TemporaryDirectory() as tmp:

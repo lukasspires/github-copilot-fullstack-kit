@@ -13,6 +13,8 @@ Choices from docs/plano-f3-envelope-e-decide-2026-10.md:
   one action per call.
 - decision 7: a graph with any node outside the envelope's expansion
   (other edges, roles or targets) stops with `graph_outside_envelope`.
+  An `accepted` pre-envelope `analisa` prefix (`pre_envelope_prefix`) is
+  not part of the expansion and is skipped by `graph_errors` and `decide`.
 - decision 9: `prossegue` follows the writer that opened the previous
   stage, because G3 requires the same role and type as its predecessor.
 - decision 1: the gray zone of `gate` is not consulted; with
@@ -134,16 +136,46 @@ def expected_scope(doc: StateDoc, env: Envelope, a: Assignment) -> tuple[tuple[s
     return node_scope(env, stage_of(doc, a.nn), effective_edge(doc, a))
 
 
-def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
-    """Every node that the envelope's expansion could not have created."""
+def pre_envelope_prefix(doc: StateDoc) -> list[Assignment]:
+    """The task's accepted pre-envelope analyses, which the expansion leaves alone.
+
+    `marina-plan` runs an analysis by the manual procedure before an envelope
+    exists, in the same task. The prefix is the longest run of nodes, in NN
+    order from the task's first node, each with `edge = "analisa"`,
+    `predecessor = 0` and `state = "accepted"`; it ends at the first node that
+    breaks the rule (normally the `inicia`). An `analisa` in any other state is
+    not part of it and stays a graph error.
+    """
+
+    prefix: list[Assignment] = []
+    for a in sorted(doc.assignments, key=lambda a: a.nn):
+        if a.edge != "analisa" or a.predecessor != 0 or a.state != "accepted":
+            break
+        prefix.append(a)
+    return prefix
+
+
+def _expansion_nodes(doc: StateDoc) -> list[Assignment]:
+    """Nodes after the pre-envelope prefix, in NN order."""
 
     nodes = sorted(doc.assignments, key=lambda a: a.nn)
+    return nodes[len(pre_envelope_prefix(doc)):]
+
+
+def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
+    """Every node that the envelope's expansion could not have created.
+
+    The pre-envelope prefix is skipped: the rules start at the first node after it.
+    """
+
+    nodes = _expansion_nodes(doc)
     errors: list[str] = []
     if nodes and (nodes[0].edge != "inicia" or nodes[0].predecessor != 0):
         errors.append(f"nn={nodes[0].nn}: the first node must be inicia with predecessor 0")
     if sum(a.edge == "inicia" for a in nodes) > 1:
         errors.append("more than one inicia node")
     by_nn = {a.nn: a for a in nodes}
+    prefix_nns = frozenset(a.nn for a in pre_envelope_prefix(doc))
     # Replaced node -> its first replacement, known before the walk: any other
     # node must follow the replacement, or the second-FAIL chain gets shorter.
     replacements: dict[int, int] = {}
@@ -152,7 +184,7 @@ def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
             replacements.setdefault(a.predecessor, a.nn)
     seen: set[int] = set()
     for a in nodes:
-        shape = _shape_error(doc, a, by_nn)
+        shape = _shape_error(doc, a, by_nn, prefix_nns)
         if shape:
             errors.append(shape)
             continue
@@ -184,12 +216,14 @@ def graph_errors(doc: StateDoc, env: Envelope) -> list[str]:
     return errors
 
 
-def _shape_error(doc: StateDoc, a: Assignment, by_nn: dict[int, Assignment]) -> str:
+def _shape_error(doc: StateDoc, a: Assignment, by_nn: dict[int, Assignment],
+                 prefix_nns: frozenset[int] = frozenset()) -> str:
     """Edge, type and predecessor shape the expansion produces; "" when it fits.
 
-    Predecessors must point to an earlier node, so `stage_of` always terminates.
-    A predecessor's edge is its effective one, so a replacement is followed
-    like the node it replaces.
+    Predecessors must point to an earlier expansion node, so `stage_of` always
+    terminates; a predecessor in the pre-envelope prefix (`prefix_nns`) is
+    named as such. A predecessor's edge is its effective one, so a replacement
+    is followed like the node it replaces.
     """
 
     if a.edge not in EDGE_TYPE and a.edge != "substitui":
@@ -199,6 +233,8 @@ def _shape_error(doc: StateDoc, a: Assignment, by_nn: dict[int, Assignment]) -> 
     if a.edge == "inicia":
         return "" if a.predecessor == 0 else f"nn={a.nn}: inicia must have predecessor 0"
     pred = by_nn.get(a.predecessor)
+    if pred is None and a.predecessor in prefix_nns:
+        return f"nn={a.nn}: predecessor {a.predecessor} is a pre-envelope analysis"
     if pred is None or a.predecessor >= a.nn:
         return f"nn={a.nn}: predecessor {a.predecessor} is not an earlier node"
     if a.edge == "substitui":
@@ -352,7 +388,9 @@ def decide(doc: StateDoc, env: Envelope | None, obs: Observations) -> Decision:
         return _stop("not_approved")
     if obs.envelope_errors:
         return _stop("envelope_invalid")
-    current = max(doc.assignments, key=lambda a: a.nn, default=None)
+    # The pre-envelope prefix is not part of the expansion; without any node
+    # after it, the task starts like an empty one.
+    current = max(_expansion_nodes(doc), key=lambda a: a.nn, default=None)
     if (
         obs.envelope_sha256 != env.approval.sha256
         or any(obs.branches.get(t) != env.branches[t] for t in env.targets)

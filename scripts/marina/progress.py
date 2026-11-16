@@ -92,6 +92,8 @@ class View:
     last_log: str
     io: tuple[list[str], list[str]]
     judge: str
+    # Accepted analyses run before the envelope; empty without a valid envelope.
+    pre_envelope: list[Assignment] = dataclasses.field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -131,13 +133,17 @@ def fill_slots(doc: StateDoc, env: env_mod.Envelope) -> tuple[list[Slot], list[A
     """Slots with their (latest) node, and the nodes outside the expansion.
 
     A `substitui` fills the slot of the node it replaces, so a replaced node
-    is never counted twice.
+    is never counted twice. The pre-envelope prefix (`decide.pre_envelope_prefix`)
+    is neither a slot nor extra; `build_view` shows it on its own.
     """
 
     slots = expansion_slots(env)
     index = {(s.stage, s.kind): i for i, s in enumerate(slots)}
     extra: list[Assignment] = []
+    prefix = {a.nn for a in decide_mod.pre_envelope_prefix(doc)}
     for a in sorted(doc.assignments, key=lambda a: a.nn):
+        if a.nn in prefix:
+            continue
         try:
             key = (decide_mod.stage_of(doc, a.nn), _kind(doc, a))
         except (ValueError, KeyError, StateError, RecursionError):
@@ -423,8 +429,10 @@ def build_view(
         else:
             at = env.approval.at.astimezone(now.tzinfo).strftime("%d/%m %H:%M")
             envelope_note = f"aprovado {env.approval.sha256[:4]}…{env.approval.sha256[-2:]} em {at}"
+    pre_envelope: list[Assignment] = []
     if env is not None:
         slots, extra = fill_slots(doc, env)
+        pre_envelope = decide_mod.pre_envelope_prefix(doc)
     else:
         slots, extra = [], sorted(doc.assignments, key=lambda a: a.nn)
     pid, started = _lock(task_dir)
@@ -462,7 +470,7 @@ def build_view(
         run_alive=alive, run_started=started, deadline=deadline, slots=slots, extra=extra,
         counts=counts(slots), estimate=estimate(slots, stats, now), stats=stats, current=current,
         current_is_next=is_next, live=live, manager_note=manager_note, activity=activity, last_log=_last_log(task_dir),
-        io=io, judge=_judge(task_dir, env),
+        io=io, judge=_judge(task_dir, env), pre_envelope=pre_envelope,
     )
 
 
@@ -556,6 +564,9 @@ def render(view: View, width: int) -> list[str]:
             over = " · nó atual acima do típico" if est.over_typical else ""
             lines.append(f"restante: {_minutes(est.low)}–{_minutes(est.high)} (p50–p80) · fim provável "
                          f"{_hm(end_low, view.now)}–{_hm(end_high, view.now)}{over}")
+        if view.pre_envelope:
+            lines.append("── análise pré-envelope " + "─" * 37)
+            lines += [f"   {a.nn:02d} {a.role} {a.edge} {a.state}" for a in view.pre_envelope]
         lines.append("── etapas planejadas " + "─" * 40)
         lines.append(f"   {'est':<3} {'NN':<3} {'papel':<14} {'tipo':<14} {'estado':<22} {'entra':<6} {'sai':<6} "
                      f"{'duração':<8} típico")

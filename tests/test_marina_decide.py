@@ -663,6 +663,96 @@ class ReplacementTests(unittest.TestCase):
         self.assertEqual(st.effective_edge(doc, doc.get_assignment(r2)), "substitui")
 
 
+class PreEnvelopePrefixTests(unittest.TestCase):
+    """An `analisa` run by the manual procedure before the envelope stays in the task."""
+
+    def test_pre_envelope_analisa_prefix_opens_inicia(self):
+        g = Graph()
+        a = g.add("architect", "analisa", 0)
+        d = decide(g)
+        self.assertEqual((d.kind, d.reason), ("launch", ""))
+        self.assertEqual(
+            d,
+            Decision("launch", node=NodeSpec(ROLE, "implementação", "inicia", 0, (TARGET,), tuple(ALLOW), 1)),
+        )
+        self.assertEqual(dm.graph_errors(g.doc, make_env()), [])
+        self.assertEqual([n.nn for n in dm.pre_envelope_prefix(g.doc)], [a])
+        # The gate's P0 (state_lint's G3 table) accepts that inicia after the analysis.
+        nn = g.writer(state="reserved")
+        self.assertEqual([e for e in check_edge_compatibility(g.doc) if f"nn={nn}" in e], [])
+
+    def test_two_analisa_prefix_then_working_writer_follows_the_writer(self):
+        g = Graph()
+        g.add("architect", "analisa", 0)
+        g.add("data-analyst", "analisa", 0)
+        g.writer(state="working")
+        self.assertEqual(len(dm.pre_envelope_prefix(g.doc)), 2)
+        self.assertEqual(dm.graph_errors(g.doc, make_env()), [])
+        plain = Graph()
+        plain.writer(state="working")
+        self.assertEqual(decide(g), decide(plain))
+        self.assertEqual(decide(g), Decision("wait"))
+
+    def test_prefix_then_accepted_writer_opens_its_review(self):
+        g = Graph()
+        g.add("architect", "analisa", 0)
+        w = g.writer()
+        self.assertEqual(
+            decide(g), Decision("launch", node=NodeSpec("reviewer", "revisão", "revisa", w, (TARGET,), tuple(ALLOW), 1))
+        )
+
+    def test_unaccepted_analisa_is_not_a_prefix(self):
+        for state in ("working", "closed_blocked", "receipt_missing", "returned"):
+            with self.subTest(state=state):
+                g = Graph()
+                g.add("architect", "analisa", 0, state)
+                self.assertEqual(dm.pre_envelope_prefix(g.doc), [])
+                d = decide(g)
+                self.assertEqual((d.kind, d.reason.split(":")[0]), ("stop", "graph_outside_envelope"))
+
+    def test_working_analisa_is_graph_outside_envelope(self):
+        g = Graph()
+        g.add("architect", "analisa", 0, "working")
+        d = decide(g)
+        self.assertEqual(
+            d, Decision("stop", reason="graph_outside_envelope: nn=1: the first node must be inicia with predecessor 0")
+        )
+
+    def test_closed_blocked_analisa_is_graph_outside_envelope(self):
+        g = Graph()
+        g.add("architect", "analisa", 0, "closed_blocked", status="blocked")
+        g.writer(state="working")
+        d = decide(g)
+        self.assertEqual((d.kind, d.reason.split(":")[0]), ("stop", "graph_outside_envelope"))
+
+    def test_prefix_ends_at_first_non_prefix_node(self):
+        g = Graph()
+        a = g.add("architect", "analisa", 0)
+        g.writer(state="working")
+        g.add("architect", "analisa", 0)
+        self.assertEqual([n.nn for n in dm.pre_envelope_prefix(g.doc)], [a])
+        self.assertEqual(decide(g).reason.split(":")[0], "graph_outside_envelope")
+
+    def test_analisa_with_predecessor_is_not_a_prefix(self):
+        g = Graph()
+        g.add("architect", "analisa", 0)
+        g.add("architect", "analisa", 1)
+        self.assertEqual(len(dm.pre_envelope_prefix(g.doc)), 1)
+        self.assertEqual(decide(g).reason.split(":")[0], "graph_outside_envelope")
+
+    def test_predecessor_in_prefix_names_the_pre_envelope_analysis(self):
+        # F1 (analisa-pre-envelope review): "is not an earlier node" misled when
+        # the predecessor exists but belongs to the pre-envelope prefix.
+        g = Graph()
+        a = g.add("architect", "analisa", 0)
+        g.writer()
+        nn = g.review(a, "PASS", state="working")
+        d = decide(g)
+        self.assertEqual(
+            d, Decision("stop", reason=f"graph_outside_envelope: nn={nn}: predecessor {a} is a pre-envelope analysis")
+        )
+
+
 class HelperTests(unittest.TestCase):
     def test_stage_of(self):
         g = Graph()
