@@ -174,10 +174,25 @@ class GitStatusDiffTests(unittest.TestCase):
 
         text = common.git_status_diff("/tmp/x", runner=fake_runner)
         self.assertEqual(
-            text, "# git status --short\n M foo.py\n\n# git diff --stat\n foo.py | 2 +-\n# untracked sha256\n"
+            text,
+            "# git status --short --untracked-files=all\n M foo.py\n\n# git diff --stat\n foo.py | 2 +-\n"
+            "# untracked sha256\n",
         )
-        self.assertEqual(calls[0][0], ("status", "--short"))
+        self.assertEqual(calls[0][0], ("status", "--short", "--untracked-files=all"))
         self.assertEqual(calls[1][0], ("diff", "--stat"))
+
+    def test_untracked_directory_is_listed_file_by_file(self):
+        # git-before must compare line by line with git-after (`git_snapshot`,
+        # `--untracked-files=all`); plain `--short` folds a directory into `?? dir/`.
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True)
+            (Path(tmp) / "dir").mkdir()
+            (Path(tmp) / "dir" / "a").write_text("a\n", encoding="utf-8")
+            (Path(tmp) / "dir" / "b").write_text("b\n", encoding="utf-8")
+            text = common.git_status_diff(tmp)
+        status = text.split("# git status --short --untracked-files=all\n")[1].split("\n# git diff --stat")[0]
+        self.assertEqual(status.splitlines(), ["?? dir/a", "?? dir/b"])
+        self.assertNotIn("?? dir/\n", text)
 
     def test_untracked_files_are_hashed(self):
         # F6 acceptance A7: a reviewer must be able to tell that a preexisting

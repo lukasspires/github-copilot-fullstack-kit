@@ -59,8 +59,15 @@ def template_errors(text: str) -> list[str]:
 
 
 def _default_instructions(kit_root: Path, targets: list[str]) -> str:
+    """The kit's AGENTS.md plus each target's AGENTS.md/CLAUDE.md that exists.
+
+    receipt_lint refuses an `instructions_read` path that does not exist, so an
+    absent target file is never named.
+    """
+
     lines = [f"- `{kit_root / 'AGENTS.md'}`"]
-    lines += [f"- `{Path(t) / name}` (if present)" for t in targets for name in ("AGENTS.md", "CLAUDE.md")]
+    lines += [f"- `{path}`" for t in targets for name in ("AGENTS.md", "CLAUDE.md")
+              if (path := Path(t) / name).is_file()]
     return "\n".join(lines)
 
 

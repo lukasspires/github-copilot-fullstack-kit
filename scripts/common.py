@@ -195,15 +195,17 @@ def git_status_diff(
     runner: Callable[..., str] = _run_git,
     read_bytes: Callable[[Path], bytes] = Path.read_bytes,
 ) -> str:
-    """Read-only `git status --short` + `git diff --stat` for one target.
+    """Read-only `git status --short --untracked-files=all` + `git diff --stat` for one target.
 
-    Format matches the kit's existing `git-before-NN.txt` convention, followed
+    Format matches the kit's existing `git-before-NN.txt` convention; untracked
+    files are listed one by one, like `git_snapshot`, so the two compare line by
+    line. It is followed
     by the sha256 of each untracked file in `git_snapshot`'s format, so a
     reviewer can compare it with `git-after-NN.txt` (F6 acceptance A7). An
     unreadable file is listed as `unreadable`, never skipped silently.
     """
 
-    status = runner(["status", "--short"], cwd=target, timeout=timeout)
+    status = runner(["status", "--short", "--untracked-files=all"], cwd=target, timeout=timeout)
     diff_stat = runner(["diff", "--stat"], cwd=target, timeout=timeout)
     status_z = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=target, timeout=timeout)
     hashes = []
@@ -213,7 +215,7 @@ def git_status_diff(
         except OSError:
             digest = "unreadable"
         hashes.append(f"{digest}  {path}\n")
-    return f"# git status --short\n{status}\n# git diff --stat\n{diff_stat}# untracked sha256\n" + "".join(hashes)
+    return f"# git status --short --untracked-files=all\n{status}\n# git diff --stat\n{diff_stat}# untracked sha256\n" + "".join(hashes)
 
 
 def git_snapshot(

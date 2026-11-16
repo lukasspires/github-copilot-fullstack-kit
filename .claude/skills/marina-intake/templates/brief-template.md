@@ -29,7 +29,7 @@ Each field ends with `(usuário)`, `(decisão da Marina)` or `(pendente, não bl
 
 ## Discovered checks
 
-<command with the target in it, e.g. `python3 -m unittest discover -s /abs/t -t /abs/t`>
+<command with the target in it, e.g. `python3 -m unittest discover -s /abs/t -t /abs/t`; for the kit itself `python3 -m unittest discover -s <kit>/tests` (no `-t`: `tests/` is not a package)>
 
 ## Open questions
 

@@ -8,6 +8,7 @@ whose handoff the existing tooling would refuse. In-memory state only.
 from __future__ import annotations
 
 import datetime
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -198,6 +199,31 @@ class RenderTests(unittest.TestCase):
         first = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
         second = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
         self.assertEqual(first, second)
+
+    def test_default_instructions_list_only_existing_target_files(self):
+        # receipt_lint refuses an `instructions_read` path that does not exist, so
+        # the handoff must never name a target file that is absent (task-8528 NN 13/18).
+        with tempfile.TemporaryDirectory() as tmp:
+            only_agents, empty = Path(tmp) / "only-agents", Path(tmp) / "empty"
+            only_agents.mkdir()
+            empty.mkdir()
+            (only_agents / "AGENTS.md").write_text("# target\n", encoding="utf-8")
+            bare = TEMPLATE.split("## Checks and workdir")[0]
+            cases = {
+                str(only_agents): [f"- `{KIT_ROOT / 'AGENTS.md'}`", f"- `{only_agents / 'AGENTS.md'}`"],
+                str(empty): [f"- `{KIT_ROOT / 'AGENTS.md'}`"],
+            }
+            for target, expected in cases.items():
+                with self.subTest(target=target):
+                    doc = _doc()
+                    a = st.add_assignment(doc, role="java-backend", type_="implementação", edge="inicia",
+                                          predecessor=0, targets=[target], allowlist=ALLOW, at=AT)
+                    text = handoff_gen.render_stage_handoff(doc, a, kit_root=KIT_ROOT, template_text=bare)
+                    section = text.split("## Target instructions to read explicitly\n\n")[1].split("\n\n## ")[0]
+                    self.assertEqual(section.splitlines(), expected)
+                    self.assertNotIn("(if present)", text)
+                    self.assertNotIn("CLAUDE.md", section)
+                    self._valid(text, a)
 
     def test_synchronize_changes_nothing(self):
         text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT, template_text=TEMPLATE)
