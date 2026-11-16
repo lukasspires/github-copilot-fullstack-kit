@@ -21,8 +21,9 @@ Subcommands:
   unless `--no-watch`.
 - `accept <project> <task> <nn>`: closes one node launched by the manual
   procedure the way `run` would (scripts/marina/accept.py); prints
-  `nn=NN -> <state>` per transition or `refused: <reason>`, and exits 0
-  only when the node ends `accepted`.
+  `nn=NN -> <state>` per transition (plus `usage limit, resets <text>`
+  when the session ended on the account's usage limit) or
+  `refused: <reason>`, and exits 0 only when the node ends `accepted`.
 - `mcp` (F5): the stdio MCP server for interactive Marina
   (scripts/marina/mcp_server.py); stdout carries only JSON-RPC.
 """
@@ -38,11 +39,13 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
-from scripts.marina import accept, envelope, hooks, mcp_server, runner, watch
+from scripts.marina import accept, envelope, hooks, mcp_server, runner, usage_limit, watch
 from scripts.state import StateError, read_state
 
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 _DEFAULT_KIT_ROOT = Path(__file__).resolve().parents[2]
+_NOTIFY_HELP = ("command run once per entry into waiting_approval and on a usage_limit stop; its environment "
+                "carries MARINA_EVENT, MARINA_TASK, MARINA_NN and MARINA_REASON")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -57,12 +60,12 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="run a task's approved envelope until done or a stop reason")
     run.add_argument("--interval", required=True, type=float, help="seconds between manager polls (> 0)")
     run.add_argument("--max-duration", required=True, help="like the envelope: 30s, 90m or 8h")
-    run.add_argument("--notify-cmd", default=None, help="command run once per entry into waiting_approval")
+    run.add_argument("--notify-cmd", default=None, help=_NOTIFY_HELP)
     run.add_argument("--recover", action="store_true", help="take over an orphan lock if no task session works")
     go = commands.add_parser("go", help="approve the whole plan by dispatching it, then start marina run (TTY only)")
     go.add_argument("--interval", type=float, default=30.0, help="seconds between manager polls (> 0)")
     go.add_argument("--max-duration", default=None, help="defaults to the envelope's max_duration")
-    go.add_argument("--notify-cmd", default=None, help="command run once per entry into waiting_approval")
+    go.add_argument("--notify-cmd", default=None, help=_NOTIFY_HELP)
     go.add_argument("--grace", type=float, default=10.0, help="seconds to cancel with Ctrl-C before approving")
     go.add_argument("--no-watch", action="store_true", help="do not open `marina watch` afterwards")
     watch_cmd = commands.add_parser("watch", help="read-only terminal view of a task's run")
@@ -260,6 +263,8 @@ def _run_accept(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO,
         return 1
     for to in result.transitions:
         print(f"nn={args.nn:02d} -> {to}", file=stdout)
+    if result.usage_limit is not None:
+        print(f"usage limit, {usage_limit.describe(result.usage_limit)}", file=stdout)
     if not result.transitions:
         print(f"nn={args.nn:02d} already {result.final_state}; nothing to do", file=stdout)
     return 0 if result.final_state == "accepted" else 1

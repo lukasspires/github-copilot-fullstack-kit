@@ -62,6 +62,7 @@ class Fixture:
         self.snapshot_calls: list[str] = []
         self.snapshot_error: Exception | None = None
         self.manager_calls = 0
+        self.projects_root = Path(tmp) / "projects"
 
     @staticmethod
     def session(state: str, status: str, waiting: str | None = None) -> dict:
@@ -87,7 +88,8 @@ class Fixture:
 
     def deps(self) -> accept.AcceptDeps:
         return accept.AcceptDeps(list_sessions=self.list_sessions, git_snapshot=self.git_snapshot,
-                                 now=lambda: AT + datetime.timedelta(minutes=5), pid_alive=lambda pid: self.lock_alive)
+                                 now=lambda: AT + datetime.timedelta(minutes=5), pid_alive=lambda pid: self.lock_alive,
+                                 projects_root=self.projects_root)
 
     def accept(self) -> accept.AcceptResult:
         return accept.accept_node(self.state_path, 1, kit_root=self.kit, deps=self.deps())
@@ -365,6 +367,64 @@ class AcceptRefusalTests(unittest.TestCase):
             self.assertEqual(result.final_state, "working")
             self.assertEqual(f.state_path.read_bytes(), before)
             self.assertFalse(f.git_after().exists())
+
+
+TRANSCRIPT_SID = "0123abcd-0123-4567-89ab-0123456789ab"
+LIMIT_NOTE = 'usage_limit resets_at=2026-11-12T22:50:00+00:00 text="7:50pm (America/Sao_Paulo)"'
+
+
+class AcceptUsageLimitTests(unittest.TestCase):
+    """limite-uso stage 1: `marina accept` records the same usage limit note as the run."""
+
+    @staticmethod
+    def _limit(f: Fixture, transcript: str | None = "limit-then-system.jsonl") -> None:
+        f.sessions = [dict(f.session("done", "idle"), sessionId=TRANSCRIPT_SID)]
+        if transcript:
+            folder = f.projects_root / "-kit"
+            folder.mkdir(parents=True)
+            shutil.copy(Path(__file__).resolve().parent / "fixtures" / "transcripts" / transcript,
+                        folder / f"{TRANSCRIPT_SID}.jsonl")
+
+    def test_receipt_missing_records_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp)
+            self._limit(f)
+            result = f.accept()
+            self.assertEqual(result.transitions, ["finished", "receipt_missing"])
+            self.assertEqual(f.node().events[-1].note, LIMIT_NOTE)
+            self.assertEqual(f.node().events[-1].by, "marina-accept")
+            self.assertEqual(result.usage_limit.reset_text, "7:50pm (America/Sao_Paulo)")
+
+    def test_receipt_invalid_from_finished_cites_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp, state="finished")
+            self._limit(f)
+            f.write_receipt(valid=False)
+            result = f.accept()
+            self.assertEqual(result.transitions, ["receipt_received", "receipt_invalid"])
+            note = f.node().events[-1].note
+            self.assertTrue(note.endswith("; " + LIMIT_NOTE), note)
+            self.assertIsNotNone(result.usage_limit)
+            self.assertNotIn("You've hit", f.state_path.read_text(encoding="utf-8"))
+
+    def test_without_transcript_nothing_changes(self):
+        for transcript in (None, "limit-then-normal.jsonl"):
+            with self.subTest(transcript=transcript), tempfile.TemporaryDirectory() as tmp:
+                f = Fixture(tmp)
+                self._limit(f, transcript)
+                result = f.accept()
+                self.assertEqual(result.transitions, ["finished", "receipt_missing"])
+                self.assertEqual(f.node().events[-1].note, "")
+                self.assertIsNone(result.usage_limit)
+
+    def test_unavailable_manager_for_a_finished_node_is_not_a_refusal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp, state="finished")
+            f.manager_error = common.ManagerUnavailable("down")
+            result = f.accept()
+            self.assertIsNone(result.refused)
+            self.assertEqual(result.transitions, ["receipt_missing"])
+            self.assertIsNone(result.usage_limit)
 
 
 if __name__ == "__main__":

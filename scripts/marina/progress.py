@@ -32,14 +32,13 @@ from typing import Callable
 from scripts import common, status_claude
 from scripts.marina import decide as decide_mod
 from scripts.marina import envelope as env_mod
-from scripts.marina import handoff_gen, runner
+from scripts.marina import handoff_gen, runner, usage_limit
 from scripts.state import Assignment, StateDoc, StateError, effective_edge, read_state, replaced_node
 from scripts.state.model import TERMINAL_STATES
 
 MIN_SAMPLES = 5
 RUNNING_STATES = ("prepared", "launched", "uncertain", "working", "waiting_approval")
 _AFTER_RUN = ("finished", "receipt_received", "receipt_validated")
-_TRANSCRIPT_TAIL = 256 * 1024
 _ACTIVITY_KEYS = ("command", "file_path", "pattern", "path", "url", "description")
 
 
@@ -94,6 +93,8 @@ class View:
     judge: str
     # Accepted analyses run before the envelope; empty without a valid envelope.
     pre_envelope: list[Assignment] = dataclasses.field(default_factory=list)
+    # limite-uso stage 2: when a live run waits to reopen the current node (resets_at + margin).
+    usage_wait_until: datetime.datetime | None = None
 
 
 # --------------------------------------------------------------------------
@@ -324,18 +325,8 @@ def _parse_timestamp(text: object) -> datetime.datetime | None:
 def last_activity(session_id: str, projects_root: Path) -> tuple[str, datetime.datetime] | None:
     """The last tool call in a session transcript, as ("Name summary", at); None if unknown."""
 
-    if not session_id:
-        return None
-    try:
-        matches = sorted(Path(projects_root).glob(f"*/{session_id}.jsonl"))
-        if not matches:
-            return None
-        with matches[0].open("rb") as fh:
-            fh.seek(0, 2)
-            size = fh.tell()
-            fh.seek(max(size - _TRANSCRIPT_TAIL, 0))
-            tail = fh.read().decode("utf-8", errors="replace")
-    except OSError:
+    tail = usage_limit.transcript_tail(session_id, projects_root)
+    if tail is None:
         return None
     for line in reversed(tail.splitlines()):
         try:
@@ -461,6 +452,11 @@ def build_view(
                     classification = "unknown"
                 manager_note = f"manager: {classification} ({match[0].get('state', '?')}/{match[0].get('status', '?')})"
                 activity = last_activity(str(match[0].get("sessionId", "")), projects_root)
+    usage_wait_until = None
+    latest = max(doc.assignments, key=lambda a: a.nn, default=None)
+    if alive and latest is not None and latest.state in ("receipt_missing", "receipt_invalid"):
+        limit = decide_mod.recorded_usage_limit(latest)
+        usage_wait_until = decide_mod.reopen_ready_at(limit) if limit is not None else None
     stats = duration_stats(history_docs)
     io: tuple[list[str], list[str]] = ([], [])
     if env is not None and current is not None:
@@ -470,7 +466,7 @@ def build_view(
         run_alive=alive, run_started=started, deadline=deadline, slots=slots, extra=extra,
         counts=counts(slots), estimate=estimate(slots, stats, now), stats=stats, current=current,
         current_is_next=is_next, live=live, manager_note=manager_note, activity=activity, last_log=_last_log(task_dir),
-        io=io, judge=_judge(task_dir, env), pre_envelope=pre_envelope,
+        io=io, judge=_judge(task_dir, env), pre_envelope=pre_envelope, usage_wait_until=usage_wait_until,
     )
 
 
@@ -585,6 +581,8 @@ def render(view: View, width: int) -> list[str]:
         lines.append(f"próxima etapa: {current.role} · {current.type} · estágio {current.stage}")
     else:
         lines.append("nenhuma etapa ativa ou prevista")
+    if view.usage_wait_until is not None:
+        lines.append(f"aguardando limite de uso até {_hm(view.usage_wait_until, view.now)}")
     activity = view.manager_note
     if view.activity is not None:
         text, at = view.activity

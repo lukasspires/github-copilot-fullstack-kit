@@ -7,6 +7,7 @@ scripts.state; `decide` itself must never do I/O (checked on its source).
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ import scripts.state as st
 from scripts.gate import find_fail_review_chain
 from scripts.marina import decide as dm
 from scripts.marina import envelope as env_mod
+from scripts.marina import usage_limit as ul
 from scripts.marina.decide import Decision, NodeSpec, Observations, Question
 from scripts.state_lint import check_edge_compatibility
 
@@ -884,3 +886,252 @@ class MultiRoleTests(unittest.TestCase):
         self._front(g, "angular", "substitui", 3, type_="implementação")
         d = self._decide(g)
         self.assertEqual(d.node, NodeSpec("reviewer", "revisão", "revisa", 4, (FRONT,), tuple(FRONT_ALLOW), 2))
+
+
+LIMIT = ul.UsageLimit("7:50pm (America/Sao_Paulo)", datetime.datetime(2026, 11, 12, 22, 50, tzinfo=datetime.timezone.utc))
+LIMIT_REASON = "usage_limit: nn={nn:02d} resets 7:50pm (America/Sao_Paulo)"
+
+
+def _annotate(g: Graph, nn: int, note: str) -> None:
+    """Put `note` on the event that brought node `nn` to its current state."""
+
+    a = g.doc.get_assignment(nn)
+    a.events[-1] = dataclasses.replace(a.events[-1], note=note)
+
+
+class UsageLimitTests(unittest.TestCase):
+    """limite-uso stage 1: the observation goes into the note, and the note stops the run."""
+
+    def test_finished_without_receipt_records_the_limit(self):
+        g = Graph()
+        nn = g.writer(state="finished")
+        d = decide(g, obs=obs_ok(receipt_exists=False, usage_limit=LIMIT))
+        self.assertEqual(d, Decision("transition", nn=nn, to="receipt_missing", reason=ul.note_for(LIMIT)))
+
+    def test_finished_with_receipt_ignores_the_limit(self):
+        g = Graph()
+        nn = g.writer(state="finished")
+        d = decide(g, obs=obs_ok(receipt_exists=True, usage_limit=LIMIT))
+        self.assertEqual(d, Decision("transition", nn=nn, to="receipt_received"))
+
+    def test_receipt_invalid_note_follows_the_first_lint_error(self):
+        g = Graph()
+        nn = g.writer(state="receipt_received")
+        summary = st.ReceiptSummary(status="", verdict="", profile_ok=False, risks_digest=[])
+        d = decide(g, obs=obs_ok(receipt_lint=(("missing status", "other"), summary), usage_limit=LIMIT))
+        self.assertEqual(d, Decision("transition", nn=nn, to="receipt_invalid",
+                                     reason=f"missing status; {ul.note_for(LIMIT)}"))
+
+    def test_receipt_missing_with_the_note_stops_with_usage_limit(self):
+        for state in ("receipt_missing", "receipt_invalid"):
+            with self.subTest(state=state):
+                g = Graph()
+                nn = g.writer(state=state)
+                _annotate(g, nn, ul.with_note("missing status" if state == "receipt_invalid" else "", LIMIT))
+                self.assertEqual(decide(g), Decision("stop", reason=LIMIT_REASON.format(nn=nn)))
+
+    def test_unparsed_limit_says_so(self):
+        g = Graph()
+        nn = g.writer(state="receipt_missing")
+        _annotate(g, nn, ul.note_for(ul.UsageLimit("7:50pm (Mars/Olympus)", None)))
+        self.assertEqual(decide(g).reason, f"usage_limit: nn={nn:02d} resets 7:50pm (Mars/Olympus) (unparsed)")
+
+    def test_without_the_note_the_reason_is_unchanged(self):
+        for state, note in (("receipt_missing", ""), ("receipt_invalid", "missing status")):
+            with self.subTest(state=state):
+                g = Graph()
+                nn = g.writer(state=state)
+                _annotate(g, nn, note)
+                self.assertEqual(decide(g), Decision("stop", reason=state))
+
+    def test_reviewer_and_corrector_stop_the_same_way(self):
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "", "receipt_missing")
+        _annotate(g, r, ul.note_for(LIMIT))
+        self.assertEqual(decide(g), Decision("stop", reason=LIMIT_REASON.format(nn=r)))
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "FAIL")
+        c = g.writer("corrige", r, "receipt_invalid")
+        _annotate(g, c, ul.with_note("missing status", LIMIT))
+        self.assertEqual(decide(g), Decision("stop", reason=LIMIT_REASON.format(nn=c)))
+
+    def test_manual_replacement_stays_valid(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _annotate(g, w, ul.note_for(LIMIT))
+        g.replace(w, "working")
+        self.assertEqual(dm.graph_errors(g.doc, make_env()), [])
+        self.assertEqual(decide(g), Decision("wait"))
+
+
+READY = LIMIT.resets_at + datetime.timedelta(seconds=ul.USAGE_LIMIT_MARGIN)
+
+
+def _limited(g: Graph, nn: int, *, limit: ul.UsageLimit = LIMIT, by: str = "marina-run") -> None:
+    """Record `limit` on the event that put node `nn` in receipt_missing/receipt_invalid, by `by`."""
+
+    a = g.doc.get_assignment(nn)
+    base = "missing status" if a.state == "receipt_invalid" else ""
+    a.events[-1] = dataclasses.replace(a.events[-1], note=ul.with_note(base, limit), by=by)
+
+
+def _auto_replace(g: Graph, nn: int, state: str = "accepted", **kw) -> int:
+    """A `substitui` the run opened on a usage limit (reserved by marina-run with the audit note)."""
+
+    r = g.replace(nn, state, **kw)
+    a = g.doc.get_assignment(r)
+    a.events[0] = dataclasses.replace(a.events[0], by="marina-run",
+                                      note=f"usage_limit: substitui nn={nn:02d}; resets_at=x; esperou 1s")
+    return r
+
+
+def wobs(now: datetime.datetime, deadline: datetime.datetime | None = None, **kw) -> Observations:
+    return obs_ok(now=now, deadline=deadline or now + datetime.timedelta(hours=8), **kw)
+
+
+class UsageLimitWaitTests(unittest.TestCase):
+    """limite-uso stage 2: with `on_usage_limit = "wait"` the run waits, then opens one `substitui`."""
+
+    def _decide(self, g: Graph, now: datetime.datetime, deadline=None, **env_overrides) -> Decision:
+        env_overrides.setdefault("on_usage_limit", "wait")
+        return decide(g, obs=wobs(now, deadline), **env_overrides)
+
+    def test_stop_policy_keeps_stopping(self):
+        for overrides in ({}, {"on_usage_limit": "stop"}):
+            with self.subTest(overrides=overrides):
+                g = Graph()
+                w = g.writer(state="receipt_missing")
+                _limited(g, w)
+                self.assertEqual(decide(g, obs=wobs(READY), **overrides),
+                                 Decision("stop", reason=LIMIT_REASON.format(nn=w)))
+
+    def test_waits_until_resets_at_plus_margin(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w)
+        for now in (LIMIT.resets_at - datetime.timedelta(hours=2), LIMIT.resets_at,
+                    READY - datetime.timedelta(seconds=1)):
+            with self.subTest(now=now):
+                self.assertEqual(self._decide(g, now),
+                                 Decision("wait", nn=w, reason="usage_limit until 2026-11-12T22:55:00+00:00"))
+
+    def test_opens_one_substitui_with_the_replaced_node_scope(self):
+        for state in ("receipt_missing", "receipt_invalid"):
+            with self.subTest(state=state):
+                g = Graph()
+                w = g.writer(state=state)
+                _limited(g, w)
+                d = self._decide(g, READY)
+                self.assertEqual(d.kind, "launch")
+                self.assertEqual(d.node, NodeSpec(ROLE, "implementação", "substitui", w, (TARGET,), tuple(ALLOW), 1))
+                waited = int((READY - g.doc.get_assignment(w).events[-1].at).total_seconds())
+                self.assertEqual(d.reason, f"usage_limit: substitui nn={w:02d}; "
+                                           f"resets_at=2026-11-12T22:50:00+00:00; esperou {waited}s")
+
+    def test_note_recorded_by_marina_accept_also_reopens(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w, by="marina-accept")
+        self.assertEqual(self._decide(g, READY).kind, "launch")
+
+    def test_note_by_another_writer_only_stops(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w, by="marina")
+        self.assertEqual(self._decide(g, READY), Decision("stop", reason=LIMIT_REASON.format(nn=w)))
+
+    def test_reset_after_the_deadline_stops_at_once(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w)
+        now = LIMIT.resets_at - datetime.timedelta(hours=1)
+        for deadline in (READY, LIMIT.resets_at):
+            with self.subTest(deadline=deadline):
+                self.assertEqual(self._decide(g, now, deadline),
+                                 Decision("stop", reason=LIMIT_REASON.format(nn=w) + " (after max_duration)"))
+
+    def test_replacement_on_the_limit_stops(self):
+        for state in ("receipt_missing", "receipt_invalid"):
+            with self.subTest(state=state):
+                g = Graph()
+                w = g.writer(state="receipt_missing")
+                _limited(g, w)
+                r = _auto_replace(g, w, state)
+                _limited(g, r)
+                self.assertEqual(self._decide(g, READY),
+                                 Decision("stop", reason=LIMIT_REASON.format(nn=r) + " (replacement)"))
+
+    def test_unparsed_reset_stops(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w, limit=ul.UsageLimit("7:50pm (Mars/Olympus)", None))
+        self.assertEqual(self._decide(g, READY),
+                         Decision("stop", reason=f"usage_limit: nn={w:02d} resets 7:50pm (Mars/Olympus) (unparsed)"))
+
+    def _two_reopens(self) -> tuple[Graph, int]:
+        """Stage 1's writer and reviewer each reopened by the run; stage 2's writer hits the limit."""
+
+        g = Graph()
+        w1 = g.writer(state="receipt_missing")
+        _limited(g, w1)
+        w2 = _auto_replace(g, w1)
+        r1 = g.review(w2, "", "receipt_missing")
+        _limited(g, r1)
+        _auto_replace(g, r1, verdict="PASS")
+        w3 = g.writer("prossegue", w2, "receipt_missing")
+        _limited(g, w3)
+        return g, w3
+
+    def test_third_reopen_in_the_task_stops(self):
+        g, w3 = self._two_reopens()
+        self.assertEqual(dm.graph_errors(g.doc, make_env(on_usage_limit="wait")), [])
+        self.assertEqual(dm.USAGE_LIMIT_MAX_REOPENS, 2)
+        self.assertEqual(self._decide(g, READY),
+                         Decision("stop", reason=LIMIT_REASON.format(nn=w3) + " (max reopens)"))
+
+    def test_manual_replacements_do_not_count(self):
+        g = Graph()
+        w1 = g.writer(state="receipt_missing")
+        w2 = g.replace(w1)
+        r1 = g.review(w2, "", "receipt_missing")
+        g.replace(r1, verdict="PASS")
+        w3 = g.writer("prossegue", w2, "receipt_missing")
+        _limited(g, w3)
+        self.assertEqual(self._decide(g, READY).node.edge, "substitui")
+
+    def test_reviewer_and_corrector_are_reopened_the_same_way(self):
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "", "receipt_missing")
+        _limited(g, r)
+        self.assertEqual(self._decide(g, READY).node,
+                         NodeSpec("reviewer", "revisão", "substitui", r, (TARGET,), tuple(ALLOW), 1))
+        g = Graph()
+        w = g.writer()
+        r = g.review(w, "FAIL")
+        c = g.writer("corrige", r, "receipt_invalid")
+        _limited(g, c)
+        self.assertEqual(self._decide(g, READY).node,
+                         NodeSpec(ROLE, "correção", "substitui", c, (TARGET,), tuple(ALLOW), 1))
+
+    def test_reopened_corrige_counts_once_in_max_corrections(self):
+        g = Graph()
+        w1 = g.writer()
+        r1 = g.review(w1, "FAIL")
+        c1 = g.writer("corrige", r1, "receipt_missing")
+        _limited(g, c1)
+        c2 = _auto_replace(g, c1)
+        g.review(c2, "PASS")
+        w2 = g.writer("prossegue", w1)
+        r3 = g.review(w2, "FAIL")
+        d = self._decide(g, READY)
+        self.assertEqual((d.kind, d.node.edge, d.node.predecessor, d.node.stage), ("launch", "corrige", r3, 2))
+
+    def test_wait_policy_needs_the_clock(self):
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w)
+        with self.assertRaises(dm.MissingObservation):
+            decide(g, on_usage_limit="wait")

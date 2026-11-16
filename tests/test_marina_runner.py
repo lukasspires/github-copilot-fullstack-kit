@@ -23,7 +23,7 @@ from pathlib import Path
 import scripts.state as st
 from scripts import preflight, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import handoff_gen, runner
+from scripts.marina import handoff_gen, runner, usage_limit
 from scripts.marina.judge import JudgeAnswer, JudgeFailed
 
 KIT_ROOT = Path(__file__).resolve().parent.parent
@@ -38,7 +38,7 @@ TEMPLATE = (
 class World:
     def __init__(self, tmp: str, *, stages: int = 1, review: str = "each_stage", verdicts: dict | None = None,
                  on_pass_with_risks: str = "judge", judge_max_calls: int = 1, max_corrections: int = 1,
-                 second_target: bool = False):
+                 second_target: bool = False, on_usage_limit: str | None = None):
         self.kit = Path(tmp) / "kit"
         agents = self.kit / ".claude" / "agents"
         agents.mkdir(parents=True)
@@ -73,6 +73,8 @@ class World:
             for n, stage in enumerate(raw["stages"], 1):
                 stage_target = targets[0] if n == 1 else targets[1]
                 stage.update(targets=[stage_target], allowlist=[f"Bash(test -d {stage_target})"])
+        if on_usage_limit is not None:
+            raw["on_usage_limit"] = on_usage_limit
         sha = env_mod.compute_hash(env_mod.parse_envelope(raw), task_dir=self.task_dir)
         raw["approval"] = {"at": AT, "sha256": sha}
         doc.envelope = raw
@@ -85,12 +87,16 @@ class World:
         self.per_target: dict[str, str] = {}
         self.branch = "feat/x"
         self.clock = 0.0
+        self.wall = AT  # wall clock at clock 0; `now()` is wall + clock
         self.auto_finish = True
         self.initial_session: dict = {"state": "working", "status": "busy"}
         self.launch_calls: list[tuple[list[str], dict]] = []
         self.judge_calls: list = []
         self.judge_result: JudgeAnswer | Exception = JudgeAnswer("continue", "risks are acceptable")
         self.notified: list[str] = []
+        self.notify_events: list[dict] = []
+        self.notify_error: Exception | None = None
+        self.projects_root = Path(tmp) / "projects"
         self.alive = False
         self.git_branch_error: Exception | None = None
 
@@ -135,6 +141,12 @@ class World:
             text += f"\n## Verdict\n\n{verdict}\n"
         (self.kit / a.receipt).write_text(text, encoding="utf-8")
 
+    def notify(self, command: str, event: dict) -> None:
+        self.notified.append(command)
+        self.notify_events.append(dict(event))
+        if self.notify_error is not None:
+            raise self.notify_error
+
     def judge(self, question, paths):
         self.judge_calls.append((question, [str(p) for p in paths]))
         if isinstance(self.judge_result, Exception):
@@ -157,12 +169,13 @@ class World:
             git_snapshot=lambda t: self.per_target.get(t, self.snapshot),
             git_branch=self.git_branch,
             judge=self.judge,
-            notify=self.notified.append,
+            notify=self.notify,
             sleep=self.sleep,
             monotonic=lambda: self.clock,
-            now=lambda: AT + datetime.timedelta(seconds=self.clock),
+            now=lambda: self.wall + datetime.timedelta(seconds=self.clock),
             pid_alive=lambda pid: self.alive,
             getpid=lambda: 4242,
+            projects_root=self.projects_root,
         )
 
     def run(self, **kwargs) -> runner.RunResult:
@@ -679,3 +692,353 @@ class LockHelperTests(unittest.TestCase):
         argv = runner.run_argv(Path("/kit"), "demo", "t1", interval=30, max_duration="2h", notify_cmd=None)
         self.assertEqual(argv[1:], ["/kit/scripts/marina/__main__.py", "run", "demo", "t1", "--interval", "30",
                                     "--max-duration", "2h", "--kit-root", "/kit"])
+
+
+SID = "0123abcd-0123-4567-89ab-0123456789ab"
+TRANSCRIPTS = Path(__file__).resolve().parent / "fixtures" / "transcripts"
+LIMIT_REASON = "usage_limit: nn=01 resets 7:50pm (America/Sao_Paulo)"
+
+
+class UsageLimitRunTests(unittest.TestCase):
+    """limite-uso stage 1: a session that ends on the usage limit stops the run with the reason."""
+
+    def _world(self, tmp: str, *, transcript: str | None = "limit-then-system.jsonl", receipt: str | None = None,
+               with_session_id: bool = True) -> World:
+        w = World(tmp)
+        w.auto_finish = False
+        w.initial_session = {"state": "working", "status": "busy"}
+        if with_session_id:
+            w.initial_session["sessionId"] = SID
+
+        def end_on_limit(seconds):
+            w.clock += seconds
+            for session in w.sessions.values():
+                if session.get("state") == "working":
+                    session.update(state="done", status="idle")
+                    if transcript:
+                        folder = w.projects_root / "-kit"
+                        folder.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(TRANSCRIPTS / transcript, folder / f"{SID}.jsonl")
+                    if receipt is not None:
+                        a = w.doc().get_assignment(int(session["name"].split(" — ")[2]))
+                        (w.kit / a.receipt).write_text(receipt, encoding="utf-8")
+
+        w.sleep = end_on_limit
+        return w
+
+    def _assert_sanitized(self, w: World) -> None:
+        for text in (w.state_path.read_text(encoding="utf-8"), w.checkpoint(),
+                     (w.task_dir / runner.LOG_NAME).read_text(encoding="utf-8"), json.dumps(w.notify_events)):
+            self.assertNotIn("You've hit", text)
+            self.assertNotIn("isApiErrorMessage", text)
+
+    def test_receipt_missing_with_limit_stops_with_usage_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            result = w.run(notify_cmd="notify-send marina")
+            self.assertEqual((result.outcome, result.reason, result.created), ("stop", LIMIT_REASON, [1]))
+            a = w.doc().get_assignment(1)
+            self.assertEqual(a.state, "receipt_missing")
+            self.assertEqual(a.events[-1].note,
+                             'usage_limit resets_at=2026-11-12T22:50:00+00:00 text="7:50pm (America/Sao_Paulo)"')
+            self.assertEqual(a.events[-1].by, "marina-run")
+            self.assertIn(f"Motivo de parada: stop({LIMIT_REASON}).", w.checkpoint())
+            self.assertEqual(w.notify_events, [{"event": "usage_limit_stop", "task": "t1", "nn": 1,
+                                                "reason": LIMIT_REASON}])
+            self._assert_sanitized(w)
+
+    def test_manual_replacement_after_the_limit_is_in_the_envelope(self):
+        from scripts.marina import decide as decide_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            w.run()
+            doc = w.doc()
+            st.add_assignment(doc, role=ROLE, type_="implementação", edge="substitui", predecessor=1,
+                              targets=[str(w.target)], allowlist=[f"Bash(test -d {w.target})"], by="marina", at=AT)
+            self.assertEqual(decide_mod.graph_errors(doc, env_mod.envelope_from_doc(doc)), [])
+
+    def test_receipt_invalid_cites_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp, receipt="# partial receipt\n")
+            result = w.run()
+            self.assertEqual((result.outcome, result.reason), ("stop", LIMIT_REASON))
+            a = w.doc().get_assignment(1)
+            self.assertEqual(a.state, "receipt_invalid")
+            first_error, _, note = a.events[-1].note.partition("; ")
+            self.assertTrue(first_error)
+            self.assertTrue(note.startswith("usage_limit resets_at=2026-11-12T22:50:00+00:00"), note)
+            self._assert_sanitized(w)
+
+    def test_without_transcript_the_reason_is_unchanged(self):
+        for transcript, with_sid in ((None, True), ("limit-then-normal.jsonl", True),
+                                     ("other-api-error.jsonl", True), ("limit-then-system.jsonl", False)):
+            with self.subTest(transcript=transcript, with_sid=with_sid), tempfile.TemporaryDirectory() as tmp:
+                w = self._world(tmp, transcript=transcript, with_session_id=with_sid)
+                result = w.run(notify_cmd="notify-send marina")
+                self.assertEqual((result.outcome, result.reason), ("stop", "receipt_missing"))
+                self.assertEqual(w.doc().get_assignment(1).events[-1].note, "")
+                self.assertEqual(w.notify_events, [])
+
+    def test_unavailable_manager_after_restart_keeps_the_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            doc = w.doc()
+            a = st.add_assignment(doc, role=ROLE, type_="implementação", edge="inicia", predecessor=0,
+                                  targets=[str(w.target)], allowlist=[f"Bash(test -d {w.target})"],
+                                  by="marina-run", at=AT)
+            a.native.id = "00000001"
+            for to in ("prepared", "launched", "working", "finished"):
+                st.append_event(a, to, by="test", at=AT)
+            st.write_state(w.state_path, doc)
+
+            def unavailable():
+                raise runner.common.ManagerUnavailable("down")
+
+            deps = w.deps()
+            deps.list_sessions = unavailable
+            result = runner.run(w.state_path, kit_root=w.kit, deps=deps, interval=10, max_duration=3600)
+            self.assertEqual(result.reason, "receipt_missing")
+
+    def test_notifier_failure_does_not_prevent_the_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            w.notify_error = RuntimeError("no notifier")
+            result = w.run(notify_cmd="notify-send marina")
+            self.assertEqual(result.reason, LIMIT_REASON)
+            self.assertIn("notify failed: no notifier", (w.task_dir / runner.LOG_NAME).read_text(encoding="utf-8"))
+
+    def test_waiting_approval_notifies_with_its_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            w.auto_finish = False
+            w.initial_session = {"state": "working", "status": "waiting", "waitingFor": "permission prompt"}
+            w.run(max_duration=45, notify_cmd="notify-send marina")
+            self.assertEqual(w.notify_events, [{"event": "waiting_approval", "task": "t1", "nn": 1,
+                                                "reason": "waiting_approval"}])
+
+    def test_waiting_approval_notifier_failure_keeps_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp)
+            w.auto_finish = False
+            w.notify_error = RuntimeError("no notifier")
+            w.initial_session = {"state": "working", "status": "waiting", "waitingFor": "permission prompt"}
+            self.assertEqual(w.run(max_duration=45, notify_cmd="notify-send marina").reason, "max_duration")
+
+
+class NotifyEnvTests(unittest.TestCase):
+    def test_enumerated_and_sanitized(self):
+        env = runner.notify_env({"event": "usage_limit_stop", "task": "t1", "nn": 9,
+                                 "reason": "usage_limit: nn=09\x1b[31m resets\n" + "x" * 300, "secret": "no"})
+        self.assertEqual(set(env), {"MARINA_EVENT", "MARINA_TASK", "MARINA_NN", "MARINA_REASON"})
+        self.assertEqual((env["MARINA_EVENT"], env["MARINA_TASK"], env["MARINA_NN"]), ("usage_limit_stop", "t1", "09"))
+        self.assertEqual(len(env["MARINA_REASON"]), runner.NOTIFY_REASON_MAX)
+        self.assertTrue(all(ch.isprintable() for ch in env["MARINA_REASON"]))
+        self.assertEqual(runner.notify_env({"event": "waiting_approval", "nn": None})["MARINA_NN"], "")
+
+    def test_child_gets_the_variables_and_closed_stdin(self):
+        with unittest.mock.patch.object(runner.subprocess, "run") as run:
+            runner._run_notify("notify-send 'marina run'", {"event": "waiting_approval", "task": "t1", "nn": 2,
+                                                             "reason": "waiting_approval"})
+        argv, kwargs = run.call_args.args[0], run.call_args.kwargs
+        self.assertEqual(argv, ["notify-send", "marina run"])
+        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual((kwargs["env"]["MARINA_EVENT"], kwargs["env"]["MARINA_NN"]), ("waiting_approval", "02"))
+
+
+RESETS = datetime.datetime(2026, 11, 12, 22, 50, tzinfo=datetime.timezone.utc)
+READY = RESETS + datetime.timedelta(seconds=300)
+WAIT_LINE = "usage_limit wait nn=01 until 2026-11-12T22:55:00+00:00"
+
+
+class UsageLimitWaitRunTests(unittest.TestCase):
+    """limite-uso stage 2: with `on_usage_limit = "wait"` the run waits for the reset and reopens the node once."""
+
+    def _world(self, tmp: str, *, limited=(1,), stages: int = 1, verdicts: dict | None = None,
+               on_usage_limit: str | None = "wait") -> World:
+        w = World(tmp, stages=stages, verdicts=verdicts if verdicts is not None else {3: "PASS"},
+                  on_usage_limit=on_usage_limit)
+        w.wall = RESETS - datetime.timedelta(hours=1)
+        w.initial_session = {"state": "working", "status": "busy", "sessionId": SID}
+        w.launched_at = {}
+        w.on_sleep = []
+        launch = w.launch
+
+        def timed_launch(argv, **kwargs):
+            nn = int(argv[argv.index("--name") + 1].split(" — ")[2])
+            w.launched_at[nn] = w.wall + datetime.timedelta(seconds=w.clock)
+            return launch(argv, **kwargs)
+
+        def sleep(seconds):
+            w.clock += seconds
+            for session in w.sessions.values():
+                if session.get("state") != "working":
+                    continue
+                session.update(state="done", status="idle")
+                nn = int(session["name"].split(" — ")[2])
+                if nn in limited:
+                    folder = w.projects_root / "-kit"
+                    folder.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(TRANSCRIPTS / "limit-then-system.jsonl", folder / f"{SID}.jsonl")
+                else:
+                    w.write_receipt(nn)
+                hook = w.after_receipt.get(nn)
+                if hook:
+                    hook()
+            for hook in w.on_sleep:
+                hook()
+
+        w.launch = timed_launch
+        w.sleep = sleep
+        return w
+
+    @staticmethod
+    def _log(w: World) -> list[str]:
+        return (w.task_dir / runner.LOG_NAME).read_text(encoding="utf-8").splitlines()
+
+    def _count(self, w: World, fragment: str) -> int:
+        return sum(1 for line in self._log(w) if fragment in line)
+
+    def test_waits_for_the_reset_then_opens_exactly_one_substitui(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            result = w.run(interval=60, max_duration=4 * 3600, notify_cmd="notify-send marina")
+            self.assertEqual((result.outcome, result.reason, result.created), ("done", "", [1, 2, 3]))
+            doc = w.doc()
+            original, sub = doc.get_assignment(1), doc.get_assignment(2)
+            self.assertEqual(original.state, "receipt_missing")
+            self.assertEqual((sub.role, sub.type, sub.edge, sub.predecessor, sub.targets, sub.allowlist),
+                             (original.role, original.type, "substitui", 1, original.targets, original.allowlist))
+            self.assertEqual(sub.state, "accepted")
+            reserved = sub.events[0]
+            self.assertEqual(reserved.by, "marina-run")
+            self.assertTrue(reserved.note.startswith(
+                "usage_limit: substitui nn=01; resets_at=2026-11-12T22:50:00+00:00; esperou "), reserved.note)
+            # Nothing opens before resets_at + 300 s, and the reopening comes at the first iteration after it.
+            self.assertGreaterEqual(w.launched_at[2], READY)
+            self.assertLess(w.launched_at[2], READY + datetime.timedelta(seconds=60))
+            self.assertEqual(len(w.launch_calls), 3)
+            # The generated handoff, preflight and launch ran for the replacement.
+            handoff = (w.kit / sub.handoff).read_text(encoding="utf-8")
+            self.assertIn("Substitui o nn=01 (node-backend, inicia)", handoff)
+            self.assertIn(str(w.task_dir / "git-after-01.txt"), handoff)
+            self.assertTrue((w.task_dir / "git-before-02.txt").exists())
+            self.assertEqual(sub.native.id, f"{2:08x}")
+            review = (w.kit / doc.get_assignment(3).handoff).read_text(encoding="utf-8")
+            self.assertIn(f"Target state before the writer: `{w.task_dir / 'git-before-01.txt'}`", review)
+            # Audit: log (one line each), checkpoint and notify.
+            self.assertEqual(self._count(w, WAIT_LINE), 1)
+            self.assertEqual(self._count(w, "usage_limit resume nn=01 → nn=02"), 1)
+            self.assertIn("- Reaberturas por limite de uso: nn=01→nn=02 (resets_at 2026-11-12T22:50:00+00:00).",
+                          w.checkpoint())
+            self.assertEqual(w.notify_events, [
+                {"event": "usage_limit_wait", "task": "t1", "nn": 1,
+                 "reason": "usage_limit until 2026-11-12T22:55:00+00:00"},
+                {"event": "usage_limit_resume", "task": "t1", "nn": 2, "reason": "usage_limit resume nn=01 → nn=02"},
+            ])
+
+    def test_without_the_key_the_run_still_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp, on_usage_limit=None)
+            result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.outcome, result.reason, result.created), ("stop", LIMIT_REASON, [1]))
+            self.assertNotIn("Reaberturas", w.checkpoint())
+
+    def test_reset_after_the_deadline_stops_at_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            result = w.run(interval=60, max_duration=1800, notify_cmd="notify-send marina")
+            self.assertEqual((result.outcome, result.reason, result.created),
+                             ("stop", f"{LIMIT_REASON} (after max_duration)", [1]))
+            self.assertLess(w.clock, 300)
+            self.assertEqual([e["event"] for e in w.notify_events], ["usage_limit_stop"])
+
+    def test_replacement_on_the_limit_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp, limited=(1, 2))
+            result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.outcome, result.reason, result.created),
+                             ("stop", "usage_limit: nn=02 resets 7:50pm (America/Sao_Paulo) (replacement)", [1, 2]))
+
+    def test_max_reopens_is_counted_from_the_state_after_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp, limited=(1, 3, 5), stages=2, verdicts={4: "PASS"})
+            w.after_receipt[5] = lambda: runner.request_stop(w.state_path)
+            first = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((first.reason, first.created), ("stop_requested", [1, 2, 3, 4, 5]))
+            doc = w.doc()
+            self.assertEqual([(a.edge, a.role) for a in doc.assignments],
+                             [("inicia", ROLE), ("substitui", ROLE), ("revisa", "reviewer"),
+                              ("substitui", "reviewer"), ("prossegue", ROLE)])
+            self.assertEqual(doc.get_assignment(4).events[0].by, "marina-run")
+            second = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((second.outcome, second.reason, second.created),
+                             ("stop", "usage_limit: nn=05 resets 7:50pm (America/Sao_Paulo) (max reopens)", []))
+
+    def test_unparsed_reset_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            doc = w.doc()
+            a = st.add_assignment(doc, role=ROLE, type_="implementação", edge="inicia", predecessor=0,
+                                  targets=[str(w.target)], allowlist=[f"Bash(test -d {w.target})"],
+                                  by="marina-run", at=w.wall)
+            for to in ("prepared", "launched", "working", "finished", "receipt_missing"):
+                note = usage_limit.note_for(usage_limit.UsageLimit("soon", None)) if to == "receipt_missing" else ""
+                st.append_event(a, to, by="marina-run", note=note, at=w.wall)
+            st.write_state(w.state_path, doc)
+            result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.reason, result.created), ("usage_limit: nn=01 resets soon (unparsed)", []))
+
+    def _during_wait(self, w: World, action) -> None:
+        """Run `action` once, at the first sleep after the wait began."""
+
+        done = []
+
+        def hook():
+            if not done and any(WAIT_LINE in line for line in self._log(w)):
+                done.append(True)
+                action()
+
+        w.on_sleep.append(hook)
+
+    def test_git_gate_compares_with_the_replaced_writers_git_after(self):
+        def dirty(w):
+            w.snapshot = "dirty\n"
+
+        def missing(w):
+            (w.task_dir / "git-after-01.txt").unlink()
+
+        for action, reason in ((dirty, "foreign_change"), (missing, "git_after_missing")):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
+                w = self._world(tmp)
+                self._during_wait(w, functools.partial(action, w))
+                result = w.run(interval=60, max_duration=4 * 3600)
+                self.assertEqual((result.outcome, result.reason, result.created), ("stop", reason, [1]))
+                self.assertEqual(len(w.launch_calls), 1)
+
+    def test_partial_work_left_by_the_writer_is_its_git_after(self):
+        # The interrupted writer changed the target; that state is git-after-01, so the gate opens.
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            w.after_receipt[1] = lambda: setattr(w, "snapshot", "partial\n")
+            result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.outcome, result.created), ("done", [1, 2, 3]))
+            self.assertEqual((w.task_dir / "git-after-01.txt").read_text(encoding="utf-8"), "partial\n")
+
+    def test_stop_during_the_wait_then_recover_from_the_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._world(tmp)
+            self._during_wait(w, lambda: runner.request_stop(w.state_path))
+            first = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((first.outcome, first.reason, first.created), ("stop", "stop_requested", [1]))
+            self.assertEqual(len(w.launch_calls), 1)
+            # The process dies during a later wait: an orphan lock is left behind.
+            w.on_sleep.clear()
+            (w.task_dir / runner.LOCK_NAME).write_text(json.dumps({"pid": 777, "started_at": "x"}), encoding="utf-8")
+            with self.assertRaises(runner.RunRefused):
+                w.run(interval=60, max_duration=4 * 3600)
+            second = w.run(interval=60, max_duration=4 * 3600, recover=True)
+            self.assertEqual((second.outcome, second.created), ("done", [2, 3]))
+            self.assertEqual(self._count(w, WAIT_LINE), 2)
+            self.assertEqual(self._count(w, "usage_limit resume nn=01 → nn=02"), 1)
+            self.assertGreaterEqual(w.launched_at[2], READY)
