@@ -4,9 +4,10 @@ A node launched by the manual procedure (`launch_node`) ends without a run
 to record its end. `accept_node` does, for that one node, what the run's
 loop does after the session ends, reusing its rules:
 
-1. `finished` (when the node is still `launched`/`working`/`waiting_approval`);
-2. for a writer without `git-after-NN.txt`, write it with `git_snapshot` of
-   each target (`runner.git_after_text`, the run's own rule);
+1. for a writer without `git-after-NN.txt`, write it with `git_snapshot` of
+   each target (`runner.git_after_text`, the run's own rule), before any
+   transition;
+2. `finished` (when the node is still `launched`/`working`/`waiting_approval`);
 3. `receipt_received`, or `receipt_missing` when the receipt is absent;
 4. `receipt_lint.lint_file`: `receipt_invalid` with the first error as the
    note, or `receipt_validated` with the `receipt_summary`;
@@ -17,15 +18,22 @@ Each step resumes from the state the node is in. Events use
 enforced) and `write_state`.
 
 It refuses, writing nothing, when the node does not exist or is not
-launched yet, when a `marina run` holds a live lock on the task, when the
-native manager is unavailable, or when it still classifies the node's
-session (`native.id`) as working or waiting for approval. A node on
-`native.platform = "unavailable"` (main-session fallback) is accepted
-without consulting the manager. A node already in a terminal state is left
-alone: no transition, no refusal, so a second run is harmless.
+launched yet, when a `marina run` holds a live lock on the task, or, for a
+node still in a session state, unless the native manager shows exactly one
+session for its `native.id` and classifies it `finished` (like the run's
+own observation): an empty `native.id`, no match, more than one match, a
+session still working or waiting for approval, an `unknown` session or an
+unavailable manager all refuse. A node already past `finished` is not
+re-checked against the manager. A node on `native.platform = "unavailable"`
+(main-session fallback) is accepted without consulting the manager. A node
+already in a terminal state is left alone: no transition, no refusal, so a
+second run is harmless.
 
-Every check that can fail (manager, Git snapshot, receipt lint) runs before
-the first write. It never answers a native approval and writes only inside
+It holds no lock of its own: it refuses a live run lock, but must not run
+while a `marina run` of the same task may start.
+
+Every check that can fail (manager, Git snapshot, receipt lint, the
+`git-after` write) runs before the first `state.toml` write. It never answers a native approval and writes only inside
 the task directory.
 
 Minimum tested Claude CLI version: 2.1.306 — through the manager listing
@@ -75,15 +83,30 @@ def deps_from_runner(deps: runner.RunnerDeps) -> AcceptDeps:
 
 
 def _session_refusal(a: Assignment, deps: AcceptDeps) -> str | None:
+    """None only when the manager shows exactly one session for `native.id`, finished.
+
+    Mirrors `runner._observe`, which records `finished` only on a single match.
+    """
+
     if a.native.platform == "unavailable":
         return None
+    if not a.native.id:
+        return "native id is empty"
     try:
         sessions = deps.list_sessions()
-        matches = status_claude.find_task_sessions(sessions, native_id=a.native.id) if a.native.id else []
+        matches = status_claude.find_task_sessions(sessions, native_id=a.native.id)
         classes = [status_claude.classify_session(s) for s in matches]
     except (common.ManagerUnavailable, common.ManagerSchemaError) as exc:
         return f"native manager unavailable: {exc}"
-    return "session still working" if any(c in _STILL_WORKING for c in classes) else None
+    if not classes:
+        return "session not found in manager"
+    if len(classes) > 1:
+        return "more than one session matches"
+    if classes[0] in _STILL_WORKING:
+        return "session still working"
+    if classes[0] != "finished":
+        return "session state unknown"
+    return None
 
 
 def accept_node(state_path: Path, nn: int, *, kit_root: Path, deps: AcceptDeps) -> AcceptResult:
@@ -103,7 +126,9 @@ def accept_node(state_path: Path, nn: int, *, kit_root: Path, deps: AcceptDeps) 
     pid = runner.live_lock_pid(state_path.parent, pid_alive=deps.pid_alive)
     if pid is not None:
         return AcceptResult([], state, f"marina run is active (pid {pid})")
-    refused = _session_refusal(a, deps)
+    # A node past `finished` already had its session observed; only a node
+    # still in a session state needs the manager to confirm it ended.
+    refused = _session_refusal(a, deps) if state in _SESSION_STATES else None
     if refused:
         return AcceptResult([], state, refused)
 
@@ -141,10 +166,13 @@ def accept_node(state_path: Path, nn: int, *, kit_root: Path, deps: AcceptDeps) 
     elif state == "receipt_validated":
         return AcceptResult([], state, f"nn={nn} is receipt_validated without a receipt_summary")
 
-    # Like the run, `git-after` is written once the node is `finished` and
-    # before `receipt_received`; a node already past `finished` gets it now.
-    if git_after is not None and state not in _SESSION_STATES:
-        path.write_text(git_after, encoding="utf-8")
+    # `git-after` is written before the first transition (`finished`, or the
+    # first one past it), so a failed write leaves `state.toml` untouched.
+    if git_after is not None:
+        try:
+            path.write_text(git_after, encoding="utf-8")
+        except OSError as exc:
+            return AcceptResult([], state, f"git-after not written: {exc}")
     transitions: list[str] = []
     for to, note, validated in plan:
         doc = read_state(state_path)
@@ -156,6 +184,4 @@ def accept_node(state_path: Path, nn: int, *, kit_root: Path, deps: AcceptDeps) 
         doc.task.updated_at = at
         write_state(state_path, doc)
         transitions.append(to)
-        if to == "finished" and git_after is not None:
-            path.write_text(git_after, encoding="utf-8")
     return AcceptResult(transitions, transitions[-1], None)

@@ -273,6 +273,86 @@ class AcceptRefusalTests(unittest.TestCase):
             self.assertEqual((result.transitions, result.final_state, result.refused), ([], "accepted", None))
             self.assertEqual(f.state_path.read_bytes(), before)
 
+    def _assert_unconfirmed(self, sessions: list[dict], reason: str, *, native_id: str = SID) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp)
+            f.write_receipt()
+            if native_id != SID:
+                doc = st.read_state(f.state_path)
+                doc.get_assignment(1).native.id = native_id
+                st.write_state(f.state_path, doc)
+            f.sessions = sessions
+            before = f.state_path.read_bytes()
+            result = f.accept()
+            self._assert_untouched(f, result, before, reason)
+            self.assertEqual(result.final_state, "working")
+            self.assertEqual(f.snapshot_calls, [])
+
+    def test_session_absent_from_manager(self):
+        self._assert_unconfirmed([dict(Fixture.session("done", "idle"), id="other999")],
+                                 "session not found in manager")
+
+    def test_empty_native_id(self):
+        self._assert_unconfirmed([Fixture.session("done", "idle")], "native id is empty", native_id="")
+
+    def test_two_matching_sessions(self):
+        self._assert_unconfirmed([Fixture.session("done", "idle"), Fixture.session("done", "idle")],
+                                 "more than one session matches")
+
+    def test_session_state_unknown(self):
+        unknown = Fixture.session("done", "idle")
+        del unknown["state"], unknown["status"]
+        self._assert_unconfirmed([unknown], "session state unknown")
+
+    def _assert_no_manager_call(self, state: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp, state=state)
+            f.write_receipt()
+            f.sessions = []
+            result = f.accept()
+            self.assertIsNone(result.refused)
+            self.assertEqual(result.final_state, "accepted")
+            self.assertEqual(f.manager_calls, 0)
+
+    def test_finished_node_does_not_consult_the_manager(self):
+        self._assert_no_manager_call("finished")
+
+    def test_receipt_received_node_does_not_consult_the_manager(self):
+        self._assert_no_manager_call("receipt_received")
+
+    def test_git_after_is_on_disk_before_finished_is_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp)
+            f.write_receipt()
+            seen: list[tuple[str, bool]] = []
+            real_write = st.write_state
+
+            def spy(path, doc):
+                seen.append((doc.get_assignment(1).state, f.git_after().exists()))
+                real_write(path, doc)
+
+            with mock.patch.object(accept, "write_state", side_effect=spy):
+                result = f.accept()
+            self.assertEqual(result.final_state, "accepted")
+            self.assertEqual(seen[0], ("finished", True))
+
+    def test_git_after_write_failure_records_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Fixture(tmp)
+            f.write_receipt()
+            before = f.state_path.read_bytes()
+            real_write_text = Path.write_text
+
+            def failing(self_path, *args, **kwargs):
+                if self_path.name == "git-after-01.txt":
+                    raise OSError("disk full")
+                return real_write_text(self_path, *args, **kwargs)
+
+            with mock.patch.object(Path, "write_text", failing):
+                result = f.accept()
+            self._assert_untouched(f, result, before, "git-after not written: disk full")
+            self.assertEqual(result.final_state, "working")
+
     def test_git_snapshot_failure_records_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             f = Fixture(tmp)
