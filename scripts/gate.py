@@ -18,7 +18,8 @@ Read-only: never writes anything, never invokes `subprocess` directly
 (the only process invocation anywhere in this module's own import chain is
 inside scripts.common.list_manager_sessions, itself read-only:
 `claude agents --json --all`). See tests/test_gate.py::NeverWritesTest for
-a source-grep demonstration.
+a source-grep demonstration. The CLI also reads (never writes) the
+project's `coordinator.toml` through scripts.marina.coordinator.load.
 
 Cross-task scope (P_writer, plan §5, D2): "any task whose targets
 intersect the new node's" means every `state.toml` under
@@ -41,6 +42,8 @@ from typing import Callable, Iterable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts import common, status_claude
+from scripts.marina import coordinator as coordinator_mod
+from scripts.marina.coordinator import Coordinator
 from scripts.state import (
     Assignment, Event, NativeMeta, StateDoc, StateError, read_state, replaced_node, reviewed_writer,
 )
@@ -305,6 +308,16 @@ def evaluate_p_progresso(doc: StateDoc, *, reviewer_nn: int, user_decided: bool)
 # --------------------------------------------------------------------------
 
 
+def _is_coordinator(session: dict, coordinator: Coordinator | None) -> bool:
+    """The manager item is the registered coordinator: same `sessionId` and same `pid`."""
+
+    return (
+        coordinator is not None
+        and session.get("sessionId") == coordinator.session_id
+        and session.get("pid") == coordinator.pid
+    )
+
+
 def evaluate_gate(
     doc: StateDoc,
     *,
@@ -317,12 +330,18 @@ def evaluate_gate(
     git_diff_acknowledged: bool = False,
     user_decided: bool = False,
     list_sessions: Callable[[], list[dict]] = common.list_manager_sessions,
+    coordinator: Coordinator | None = None,
 ) -> GateResult:
     """Evaluate P0 + the relevant predicate(s) for a proposed new node.
 
     Never creates, transitions or launches anything; `state add` is the
     only thing that actually reserves the node once this returns
     `allowed=True`.
+
+    `coordinator` (the project's registered coordinator session, see
+    scripts/marina/coordinator.py) exempts exactly one session from the
+    unknown-working-session check: the one whose `sessionId` *and* `pid`
+    both equal the registration. Every other check is unchanged.
     """
 
     targets = list(targets)
@@ -356,6 +375,9 @@ def evaluate_gate(
                 if status_claude.classify_session(session) != "working" or cwd is None:
                     continue
                 if cwd in targets and session.get("name") not in known_titles:
+                    if _is_coordinator(session, coordinator):
+                        notes.append(f"coordinator session {coordinator.session_id[:8]} ignored")
+                        continue
                     reasons.append(
                         f"unknown working session with cwd in the new node's targets: {session.get('name')!r}"
                     )
@@ -405,6 +427,8 @@ def main(argv: list[str] | None = None) -> int:
         sibling_docs=sibling_docs,
         git_diff_acknowledged=args.git_diff_acknowledged,
         user_decided=args.user_decided,
+        list_sessions=common.list_manager_sessions,
+        coordinator=coordinator_mod.load(doc.task.kit_root, doc.task.project),
     )
     for note in result.notes:
         print(f"NOTE: {note}")

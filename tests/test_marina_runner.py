@@ -10,6 +10,7 @@ handoff_sync and receipt_lint run for real against a temporary kit root.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import functools
 import json
@@ -23,7 +24,8 @@ from pathlib import Path
 import scripts.state as st
 from scripts import preflight, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import handoff_gen, runner, usage_limit
+from scripts.marina import coordinator, handoff_gen, runner, usage_limit
+from scripts.marina import decide as decide_mod
 from scripts.marina.judge import JudgeAnswer, JudgeFailed
 
 KIT_ROOT = Path(__file__).resolve().parent.parent
@@ -1042,3 +1044,95 @@ class UsageLimitWaitRunTests(unittest.TestCase):
             self.assertEqual(self._count(w, WAIT_LINE), 2)
             self.assertEqual(self._count(w, "usage_limit resume nn=01 → nn=02"), 1)
             self.assertGreaterEqual(w.launched_at[2], READY)
+
+
+class ReopeningRecognitionTests(unittest.TestCase):
+    """gate-coordenadora F2: a reopening is recognized by the decision's note prefix, and its
+    `resets_at` comes from `Decision.resets_at`, never parsed back out of the note."""
+
+    @staticmethod
+    def _rewrite(w: World, rewrite) -> unittest.mock._patch:
+        real = runner.decide
+
+        def fake(doc, env, obs):
+            decision = real(doc, env, obs)
+            if decision.kind == "launch" and decision.node.edge == "substitui":
+                decision = rewrite(decision)
+            return decision
+
+        return unittest.mock.patch.object(runner, "decide", fake)
+
+    def test_substitui_without_the_reopen_prefix_gets_no_reopen_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = UsageLimitWaitRunTests._world(None, tmp)
+            with self._rewrite(w, lambda d: dataclasses.replace(d, reason="manual replacement")):
+                result = w.run(interval=60, max_duration=4 * 3600, notify_cmd="notify-send marina")
+            self.assertEqual((result.outcome, result.created), ("done", [1, 2, 3]))
+            reserved = w.doc().get_assignment(2).events[0]
+            self.assertEqual((reserved.by, reserved.note), ("marina-run", "stage 1"))
+            log = (w.task_dir / runner.LOG_NAME).read_text(encoding="utf-8")
+            self.assertNotIn("usage_limit resume", log)
+            self.assertNotIn("Reaberturas", w.checkpoint())
+            self.assertNotIn("usage_limit_resume", [e["event"] for e in w.notify_events])
+
+    def test_resets_at_comes_from_the_structured_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = UsageLimitWaitRunTests._world(None, tmp)
+            # The note keeps the prefix but no longer spells resets_at: the checkpoint must still show it.
+            rewrite = lambda d: dataclasses.replace(d, reason=f"{decide_mod.REOPEN_NOTE_PREFIX}nn=01; esperou 1s")  # noqa: E731
+            with self._rewrite(w, rewrite):
+                result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.outcome, result.created), ("done", [1, 2, 3]))
+            self.assertIn("- Reaberturas por limite de uso: nn=01→nn=02 (resets_at 2026-11-12T22:50:00+00:00).",
+                          w.checkpoint())
+
+    def test_decide_puts_resets_at_on_the_reopening_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = UsageLimitWaitRunTests._world(None, tmp)
+            seen: list = []
+            with self._rewrite(w, lambda d: seen.append(d) or d):
+                w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual(len(seen), 1)
+            self.assertEqual(seen[0].resets_at, RESETS)
+            self.assertTrue(seen[0].reason.startswith(decide_mod.REOPEN_NOTE_PREFIX))
+
+
+COORD_SID = "0123abcd-0123-4567-89ab-0123456789ab"
+COORD_ENV = {"CLAUDE_CODE_AGENT": "marina", "CLAUDE_CODE_SESSION_ID": COORD_SID}
+
+
+class CoordinatorRunTests(unittest.TestCase):
+    """gate-coordenadora: the registered coordinator, working in the target, does not stop the run."""
+
+    @staticmethod
+    def _with_coordinator(w: World, *, register: bool) -> None:
+        session = {"id": "c0ffee01", "sessionId": COORD_SID, "pid": 4321, "name": "marina (11)",
+                   "cwd": str(w.target), "kind": "interactive", "state": "working", "status": "busy"}
+        base = w.list_sessions
+        w.list_sessions = lambda: [*base(), dict(session)]
+        if register:
+            assert coordinator.register(w.kit, "demo", env=COORD_ENV, ppid=4321, now=AT)
+
+    def test_registered_coordinator_lets_the_run_open_inicia(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, verdicts={2: "PASS"})
+            self._with_coordinator(w, register=True)
+            result = w.run()
+            self.assertEqual((result.outcome, result.reason, result.created), ("done", "", [1, 2]))
+
+    def test_registered_coordinator_lets_the_run_reopen_after_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = UsageLimitWaitRunTests._world(None, tmp)
+            self._with_coordinator(w, register=True)
+            result = w.run(interval=60, max_duration=4 * 3600)
+            self.assertEqual((result.outcome, result.reason, result.created), ("done", "", [1, 2, 3]))
+            self.assertEqual(w.doc().get_assignment(2).edge, "substitui")
+
+    def test_without_registration_the_run_stops_with_gate_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, verdicts={2: "PASS"})
+            self._with_coordinator(w, register=False)
+            result = w.run()
+            self.assertEqual((result.outcome, result.created), ("stop", []))
+            self.assertEqual(result.reason,
+                             "gate_refused: unknown working session with cwd in the new node's targets: 'marina (11)'")

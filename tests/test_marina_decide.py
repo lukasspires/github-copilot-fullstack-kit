@@ -1030,6 +1030,15 @@ class UsageLimitWaitTests(unittest.TestCase):
                 self.assertEqual(d.reason, f"usage_limit: substitui nn={w:02d}; "
                                            f"resets_at=2026-11-12T22:50:00+00:00; esperou {waited}s")
 
+    def test_reopening_carries_resets_at_as_a_structured_field(self):
+        # gate-coordenadora F2: the runner reads `resets_at` here, never from the note.
+        g = Graph()
+        w = g.writer(state="receipt_missing")
+        _limited(g, w)
+        d = self._decide(g, READY)
+        self.assertEqual(d.resets_at, datetime.datetime(2026, 11, 12, 22, 50, tzinfo=datetime.timezone.utc))
+        self.assertIsNone(Decision("launch").resets_at)
+
     def test_note_recorded_by_marina_accept_also_reopens(self):
         g = Graph()
         w = g.writer(state="receipt_missing")

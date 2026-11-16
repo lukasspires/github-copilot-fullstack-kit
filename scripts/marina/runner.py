@@ -70,8 +70,8 @@ from typing import Callable
 
 from scripts import common, gate, handoff_sync, launch_claude, preflight, receipt_lint, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import handoff_gen, judge, usage_limit
-from scripts.marina.decide import Decision, NodeSpec, Observations, Question, decide
+from scripts.marina import coordinator, handoff_gen, judge, usage_limit
+from scripts.marina.decide import REOPEN_NOTE_PREFIX, Decision, NodeSpec, Observations, Question, decide
 from scripts.state import (
     Assignment, StateDoc, add_assignment, append_event, effective_edge, read_state, reviewed_writer, write_state,
 )
@@ -550,10 +550,12 @@ class _Run:
             return handoff_gen.render_correction_handoff(doc, a, kit_root=self.kit_root, template_text=template)
         return handoff_gen.render_stage_handoff(doc, a, kit_root=self.kit_root, template_text=template)
 
-    def _open(self, doc: StateDoc, env: env_mod.Envelope, node: NodeSpec, reopen_note: str = "") -> str:
+    def _open(self, doc: StateDoc, env: env_mod.Envelope, node: NodeSpec, reopen_note: str = "",
+              resets_at: datetime.datetime | None = None) -> str:
         """Open one node; returns a stop reason, or "" once launch_claude ran.
 
-        `reopen_note` (a usage-limit `substitui`) is the `reserved` event's audit note.
+        `reopen_note` (a usage-limit `substitui`, recognized by `REOPEN_NOTE_PREFIX`) is the
+        `reserved` event's audit note; `resets_at` is its `Decision.resets_at`.
         """
 
         if mode_for_role(node.role) == "writer":
@@ -565,6 +567,8 @@ class _Run:
             targets=list(node.targets),
             sibling_docs=gate.load_task_docs(self.task_dir.parent, exclude_slug=doc.task.slug),
             git_diff_acknowledged=True, user_decided=False, list_sessions=self.deps.list_sessions,
+            # .agent-state/<project>/tasks/<task>: the project's registered coordinator, if any.
+            coordinator=coordinator.load(self.kit_root, self.task_dir.parent.parent.name),
         )
         if not result.allowed:
             return f"gate_refused: {result.reasons[0]}"
@@ -592,8 +596,8 @@ class _Run:
         if reopen_note:
             resume = f"usage_limit resume nn={node.predecessor:02d} → nn={a.nn:02d}"
             self.log(resume)
-            resets_at = reopen_note.split("resets_at=", 1)[-1].split(";", 1)[0]
-            self.reopenings.append(f"nn={node.predecessor:02d}→nn={a.nn:02d} (resets_at {resets_at})")
+            when = resets_at.astimezone(datetime.timezone.utc).isoformat() if resets_at is not None else "?"
+            self.reopenings.append(f"nn={node.predecessor:02d}→nn={a.nn:02d} (resets_at {when})")
             self._notify("usage_limit_resume", doc, a.nn, resume)
         return ""
 
@@ -638,8 +642,9 @@ class _Run:
             self._transition(decision)
             return None
         if decision.kind == "launch":
-            reopen_note = decision.reason if decision.node.edge == "substitui" else ""
-            refused = self._open(doc, env, decision.node, reopen_note)
+            reopening = decision.reason.startswith(REOPEN_NOTE_PREFIX)
+            refused = self._open(doc, env, decision.node, decision.reason if reopening else "",
+                                 resets_at=decision.resets_at if reopening else None)
             return Decision("stop", reason=refused) if refused else None
         if decision.kind == "stop" and decision.reason.startswith("usage_limit:"):
             current = max(doc.assignments, key=lambda a: a.nn, default=None)
