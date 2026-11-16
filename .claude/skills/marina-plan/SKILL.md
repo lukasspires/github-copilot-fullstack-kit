@@ -11,7 +11,7 @@ Start only from a brief confirmed under [marina-intake](../marina-intake/SKILL.m
 
 - **One stage per independently reviewable deliverable**, owned by one writer role. Fold setup and documentation into the stage that needs them.
 - **Writer roles.** A plan may change role between stages; `marina run` links them with `encadeia`. More than one role requires `review = "each_stage"`. Route by the kit guide's team mapping; SQL migrations go to the module owner.
-- **Analysis first.** A material architecture decision, shared contract, migration or backfill first gets an `analisa` node for the architect, run by the manual procedure before the envelope exists.
+- **Analysis first.** A material architecture decision, shared contract, migration or backfill first gets an `analisa` node for the architect, run by the manual procedure before the envelope exists. Keep it in the same task: `marina run` accepts it only as a pre-envelope prefix — `analisa` nodes with predecessor 0, all `accepted`, before the first `inicia`.
 - **Scope.** Give each stage `targets` (a subset of the envelope's) and an `allowlist` of `Bash(...)` rules that name a target path, derived from the brief's checks. Reviews in `each_stage` use the stage's allowlist, so it includes what the reviewer needs (for example `Bash(git -C <target> diff *)`).
 - **Commits and pushes.** No commit or push rule unless the brief records that authorization.
 

@@ -571,6 +571,34 @@ class ReplacementTests(unittest.TestCase):
             self.assertEqual((result.outcome, result.reason, result.created), ("stop", "foreign_change", [3]))
 
 
+class PreEnvelopePrefixTests(unittest.TestCase):
+    """F2 (analisa-pre-envelope review): the agenda/task-8528 shape, an accepted
+    `architect analisa` (predecessor 0) run by hand before the envelope."""
+
+    def test_accepted_analisa_prefix_then_run_opens_stage_one_inicia(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(tmp, verdicts={3: "PASS"})
+            doc = w.doc()
+            a = st.add_assignment(doc, role="architect", type_="análise", edge="analisa", predecessor=0,
+                                  targets=[str(w.target)], allowlist=[f"Bash(test -d {w.target})"],
+                                  by="marina", at=AT)
+            for to in ("prepared", "launched", "working", "finished", "receipt_received", "receipt_validated"):
+                st.set_state(doc, a.nn, to, by="marina", at=AT)
+                if to == "receipt_validated":
+                    a.receipt_summary = st.ReceiptSummary(status="done", verdict="", profile_ok=True)
+            st.set_state(doc, a.nn, "accepted", by="marina", at=AT)
+            st.write_state(w.state_path, doc)
+
+            result = w.run()
+            self.assertEqual((result.outcome, result.reason, result.created), ("done", "", [2, 3]))
+            first_launch = w.launch_calls[0][0]
+            self.assertIn(f"t1 — {ROLE} — 02 — implementação", first_launch[first_launch.index("--name") + 1])
+            opened = w.doc().get_assignment(2)
+            self.assertEqual((opened.role, opened.edge, opened.predecessor), (ROLE, "inicia", 0))
+            self.assertEqual(w.doc().get_assignment(1).state, "accepted")
+            self.assertIn("Implement stage 1.", (w.kit / opened.handoff).read_text(encoding="utf-8"))
+
+
 class PreviewTests(unittest.TestCase):
     def _files(self, w: World) -> dict[str, bytes]:
         return {p.name: p.read_bytes() for p in w.task_dir.iterdir()}
