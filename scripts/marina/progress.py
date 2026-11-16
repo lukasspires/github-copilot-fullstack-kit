@@ -454,7 +454,9 @@ def build_view(
                 activity = last_activity(str(match[0].get("sessionId", "")), projects_root)
     usage_wait_until = None
     latest = max(doc.assignments, key=lambda a: a.nn, default=None)
-    if alive and latest is not None and latest.state in ("receipt_missing", "receipt_invalid"):
+    # Only a "wait" envelope waits for the reset; under "stop" the run stops on the limit.
+    waits = env is not None and env.on_usage_limit == "wait"
+    if waits and alive and latest is not None and latest.state in ("receipt_missing", "receipt_invalid"):
         limit = decide_mod.recorded_usage_limit(latest)
         usage_wait_until = decide_mod.reopen_ready_at(limit) if limit is not None else None
     stats = duration_stats(history_docs)

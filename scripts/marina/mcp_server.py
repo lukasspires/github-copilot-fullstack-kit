@@ -18,7 +18,9 @@ No tool approves an envelope: only `marina go` or `marina approve` on a TTY does
 root is the server's own and never a tool argument; `project`/`task` must
 fullmatch `^[a-z0-9-]+$`. The four tools that change state refuse while a
 `marina run` holds the task lock (plan decision 6). Writes stay inside the
-task directory.
+task directory, except `.agent-state/<project>/coordinator.toml`: every call
+with a `project` first records the calling session as the project's
+coordinator (scripts/marina/coordinator.py; best effort, never fails the tool).
 
 Minimum tested Claude CLI version: 2.1.306 — through `launch_claude` and the
 manager listing; the detached `run_start` child is this kit's own CLI.
@@ -34,11 +36,11 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Mapping, TextIO
 
 from scripts import common, gate, handoff_sync, launch_claude, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import accept, runner
+from scripts.marina import accept, coordinator, runner
 from scripts.state import StateDoc, StateError, add_assignment, dumps_state, read_state
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -56,6 +58,10 @@ class McpDeps:
     run_launch: Callable[..., Any]
     spawn: Callable[[list[str], Path, Path], int]
     runner_deps: Callable[[Path], runner.RunnerDeps]
+    # Coordinator registration (gate-coordenadora): the session's environment and the
+    # server's parent pid, which is the session process.
+    environ: Mapping[str, str] = dataclasses.field(default_factory=lambda: os.environ)
+    getppid: Callable[[], int] = os.getppid
 
 
 # Kept under its F5 name; the implementation is shared with `marina go` (F7).
@@ -209,6 +215,7 @@ class Server:
     def _call(self, name: str, arguments: Any) -> dict:
         try:
             _check_arguments(self._schemas[name], arguments)
+            self._register_coordinator(arguments.get("project"))
             payload, is_error = self._handlers[name](**arguments), False
         except ToolError as exc:
             payload, is_error = {"error": str(exc)}, True
@@ -220,6 +227,16 @@ class Server:
         return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
     # -- helpers -----------------------------------------------------------------
+
+    def _register_coordinator(self, project: Any) -> None:
+        """Record this server's session as the project's coordinator; a failure never fails the tool."""
+
+        if not isinstance(project, str):
+            return
+        try:
+            coordinator.register(self.kit_root, project, env=self.deps.environ, ppid=self.deps.getppid())
+        except Exception as exc:  # noqa: BLE001 — registration is best effort
+            print(f"marina mcp: coordinator registration skipped: {type(exc).__name__}", file=sys.stderr)
 
     def _state_path(self, project: str, task: str) -> Path:
         for label, value in (("project", project), ("task", task)):
@@ -318,7 +335,7 @@ class Server:
             doc, role=role, type_=type, edge=edge, predecessor=predecessor, targets=targets,
             sibling_docs=gate.load_task_docs(state_path.parent.parent, exclude_slug=doc.task.slug),
             git_diff_acknowledged=git_diff_acknowledged, user_decided=user_decided,
-            list_sessions=self.deps.list_sessions,
+            list_sessions=self.deps.list_sessions, coordinator=coordinator.load(self.kit_root, project),
         )
         return {"allowed": result.allowed, "reasons": result.reasons, "notes": result.notes}
 

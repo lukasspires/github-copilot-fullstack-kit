@@ -42,7 +42,8 @@ envelope's `on_usage_limit = "wait"`, such a node whose note was written by
 `wait` (reason `usage_limit until <iso>`) while the wall clock
 `Observations.now` is before `resets_at + USAGE_LIMIT_MARGIN`, then
 `launch` of a `substitui` with its role, type and scope (the `Decision`
-reason is the audit note of the `reserved` event). It stops instead, with
+reason, starting with `REOPEN_NOTE_PREFIX`, is the audit note of the
+`reserved` event, and `Decision.resets_at` carries the reset time). It stops instead, with
 the usage_limit reason plus a suffix, when that moment is not before
 `Observations.deadline` (`(after max_duration)`), when the node is itself a
 `substitui` (`(replacement)`) or when the task already has
@@ -143,6 +144,8 @@ class Decision:
     notify: bool = False
     question: Question | None = None
     receipt_summary: ReceiptSummary | None = None
+    # A usage-limit reopening's reset time, so the runner never parses it back out of `reason`.
+    resets_at: DateTime | None = None
 
 
 def _stop(reason: str) -> Decision:
@@ -439,7 +442,7 @@ def _after_usage_limit(doc: StateDoc, env: Envelope, current: Assignment, limit:
     waited = max(int((obs.now - event.at).total_seconds()), 0)
     note = (f"{REOPEN_NOTE_PREFIX}nn={current.nn:02d}; "
             f"resets_at={limit.resets_at.astimezone(timezone.utc).isoformat()}; esperou {waited}s")
-    return Decision("launch", node=node, reason=note)
+    return Decision("launch", node=node, reason=note, resets_at=limit.resets_at)
 
 
 def _decide_for_state(doc: StateDoc, env: Envelope, current: Assignment, obs: Observations) -> Decision:

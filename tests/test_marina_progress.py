@@ -30,7 +30,8 @@ EDGE_TYPE = {"inicia": "implementação", "prossegue": "implementação", "encad
              "revisa": "revisão", "corrige": "correção"}
 
 
-def make_env(*, stages=(("java-backend", None),), review="each_stage", max_corrections=1) -> env_mod.Envelope:
+def make_env(*, stages=(("java-backend", None),), review="each_stage", max_corrections=1,
+             on_usage_limit: str | None = None) -> env_mod.Envelope:
     raw_stages = []
     for n, (role, target) in enumerate(stages, 1):
         stage = {"role": role, "handoff": f"stage-{n}-handoff-template.md"}
@@ -38,13 +39,16 @@ def make_env(*, stages=(("java-backend", None),), review="each_stage", max_corre
             stage.update(targets=[target], allowlist=[f"Bash(test -d {target})"])
         raw_stages.append(stage)
     targets = sorted({t for _, t in stages if t} | {API})
-    return env_mod.parse_envelope({
+    raw = {
         "targets": targets, "branches": {t: "feat/x" for t in targets},
         "allowlist": [f"Bash(test -d {t})" for t in targets], "review": review,
         "max_corrections": max_corrections, "max_duration": "2h", "judge_max_calls": 1,
         "on_pass_with_risks": "accept", "stages": raw_stages,
         "approval": {"at": AT, "sha256": "a" * 64},
-    })
+    }
+    if on_usage_limit is not None:
+        raw["on_usage_limit"] = on_usage_limit
+    return env_mod.parse_envelope(raw)
 
 
 class Graph:
@@ -262,7 +266,8 @@ class IoAndActivityTests(unittest.TestCase):
 
 
 class ViewTests(unittest.TestCase):
-    def _fixture(self, tmp: str, *, envelope: bool = True, analysis: bool = False) -> Path:
+    def _fixture(self, tmp: str, *, envelope: bool = True, analysis: bool = False,
+                 on_usage_limit: str | None = None) -> Path:
         kit = Path(tmp) / "kit"
         task_dir = kit / ".agent-state" / "demo" / "tasks" / "t1"
         task_dir.mkdir(parents=True)
@@ -274,7 +279,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(first, 1 if analysis else 0)
         g.doc.task.kit_root = str(kit)
         if envelope:
-            g.doc.envelope = env_mod.envelope_to_raw(make_env())
+            g.doc.envelope = env_mod.envelope_to_raw(make_env(on_usage_limit=on_usage_limit))
         st.write_state(task_dir / "state.toml", g.doc)
         return task_dir / "state.toml"
 
@@ -360,25 +365,39 @@ class ViewTests(unittest.TestCase):
             text = "\n".join(pg.render(self._view(self._fixture(tmp), sessions=None), 100))
         self.assertIn("manager indisponível", text)
 
+    def _limited_view(self, tmp: str, *, on_usage_limit: str | None, alive: bool) -> pg.View:
+        """The current node ended on the limit; `alive` says whether a run holds the lock."""
+
+        state_path = self._fixture(tmp, on_usage_limit=on_usage_limit)
+        doc = st.read_state(state_path)
+        for to in ("finished", "receipt_missing"):
+            st.set_state(doc, 2, to, by="marina-run", at=AT, note=(
+                'usage_limit resets_at=2026-10-28T22:00:00+00:00 text="10pm (UTC)"' if to == "receipt_missing"
+                else ""))
+        st.write_state(state_path, doc)
+        (state_path.parent / ".marina-run.lock").write_text(
+            json.dumps({"pid": 4242, "started_at": AT.isoformat()}), encoding="utf-8")
+        return pg.build_view(
+            state_path, kit_root=state_path.parents[4], now=AT + datetime.timedelta(minutes=8), sessions=[],
+            pid_alive=lambda pid: alive, projects_root=state_path.parent, history_docs=[])
+
     def test_render_shows_the_usage_limit_wait_while_the_run_lives(self):
-        # limite-uso stage 2: the current node ended on the limit and a live run holds the lock.
+        # limite-uso stage 2: under on_usage_limit = "wait", with a live run holding the lock.
         with tempfile.TemporaryDirectory() as tmp:
-            state_path = self._fixture(tmp)
-            doc = st.read_state(state_path)
-            for to in ("finished", "receipt_missing"):
-                st.set_state(doc, 2, to, by="marina-run", at=AT, note=(
-                    'usage_limit resets_at=2026-10-28T22:00:00+00:00 text="10pm (UTC)"' if to == "receipt_missing"
-                    else ""))
-            st.write_state(state_path, doc)
-            (state_path.parent / ".marina-run.lock").write_text(
-                json.dumps({"pid": 4242, "started_at": AT.isoformat()}), encoding="utf-8")
-            view = lambda alive: pg.build_view(  # noqa: E731
-                state_path, kit_root=state_path.parents[4], now=AT + datetime.timedelta(minutes=8), sessions=[],
-                pid_alive=lambda pid: alive, projects_root=state_path.parent, history_docs=[])
-            live = "\n".join(pg.render(view(True), 100))
-            dead = "\n".join(pg.render(view(False), 100))
+            live = "\n".join(pg.render(self._limited_view(tmp, on_usage_limit="wait", alive=True), 100))
+        with tempfile.TemporaryDirectory() as tmp:
+            dead = "\n".join(pg.render(self._limited_view(tmp, on_usage_limit="wait", alive=False), 100))
         self.assertIn("aguardando limite de uso até 22:05", live)
         self.assertNotIn("aguardando limite de uso", dead)
+
+    def test_no_usage_limit_wait_line_unless_the_envelope_waits(self):
+        # gate-coordenadora F3: under "stop" (or the default) the run stops on the limit, so nothing waits.
+        for policy in ("stop", None):
+            with self.subTest(policy=policy), tempfile.TemporaryDirectory() as tmp:
+                view = self._limited_view(tmp, on_usage_limit=policy, alive=True)
+                text = "\n".join(pg.render(view, 100))
+                self.assertIsNone(view.usage_wait_until)
+                self.assertNotIn("aguardando limite de uso", text)
 
     def test_render_respects_width(self):
         with tempfile.TemporaryDirectory() as tmp:

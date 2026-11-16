@@ -20,7 +20,7 @@ from unittest import mock
 
 import scripts.state as st
 from scripts.marina import envelope as env_mod
-from scripts.marina import mcp_server, runner
+from scripts.marina import coordinator, mcp_server, runner
 from scripts.marina.judge import JudgeAnswer
 
 KIT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +30,7 @@ TEMPLATE = "## Objective\n\nDo it.\n\n## Write scope\n\n`src/`\n\n## Acceptance 
 READ_TOOLS = {"task_status", "envelope_show", "sessions", "next_nn", "gate_check", "decision_preview",
               "handoff_validate"}
 ACTION_TOOLS = {"envelope_draft", "state_reserve", "launch_node", "run_start", "run_stop", "node_accept"}
+COORD_SID = "0123abcd-0123-4567-89ab-0123456789ab"
 
 
 class Fixture:
@@ -69,6 +70,9 @@ class Fixture:
         self.launches: list[tuple] = []
         self.spawns: list[tuple] = []
         self.launch_result = launch_ok()
+        # None keeps McpDeps' own defaults (the real environment and parent pid).
+        self.environ: dict | None = None
+        self.getppid = lambda: 4321
 
     def list_sessions(self) -> list[dict]:
         if self.sessions_error is not None:
@@ -92,8 +96,9 @@ class Fixture:
         )
 
     def server(self) -> mcp_server.Server:
+        extra = {} if self.environ is None else {"environ": self.environ, "getppid": self.getppid}
         deps = mcp_server.McpDeps(list_sessions=self.list_sessions, run_launch=self.run_launch, spawn=self.spawn,
-                                  runner_deps=self.runner_deps)
+                                  runner_deps=self.runner_deps, **extra)
         return mcp_server.Server(self.kit, deps)
 
     def lock(self) -> None:
@@ -267,6 +272,54 @@ class ReadToolTests(unittest.TestCase):
             ok = call(fx.server(), "gate_check", project="demo", task="t1", role=ROLE, type="implementação",
                       edge="inicia", predecessor=0, targets=[str(fx.target)], git_diff_acknowledged=True)[1]
             self.assertTrue(ok["allowed"], ok)
+
+    def _coordinator_world(self, tmp: str) -> Fixture:
+        fx = Fixture(tmp)
+        fx.sessions = [{"id": "c0ffee01", "sessionId": COORD_SID, "pid": 4321, "name": "marina (11)",
+                        "cwd": str(fx.target), "kind": "interactive", "state": "working", "status": "busy"}]
+        return fx
+
+    def _gate_inicia(self, fx: Fixture) -> dict:
+        error, payload = call(fx.server(), "gate_check", project="demo", task="t1", role=ROLE, type="implementação",
+                              edge="inicia", predecessor=0, targets=[str(fx.target)], git_diff_acknowledged=True)
+        self.assertFalse(error, payload)
+        return payload
+
+    def test_gate_check_from_marina_registers_and_ignores_the_coordinator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = self._coordinator_world(tmp)
+            fx.environ = {"CLAUDE_CODE_AGENT": "marina", "CLAUDE_CODE_SESSION_ID": COORD_SID,
+                          "CLAUDE_CODE_MESSAGING_TOKEN": "fake-token"}
+            payload = self._gate_inicia(fx)
+            self.assertTrue(payload["allowed"], payload)
+            self.assertIn(f"coordinator session {COORD_SID[:8]} ignored", payload["notes"])
+            registered = coordinator.load(fx.kit, "demo")
+            self.assertEqual((registered.session_id, registered.pid), (COORD_SID, 4321))
+            self.assertNotIn("fake-token", (fx.kit / ".agent-state" / "demo" / "coordinator.toml").read_text())
+
+    def test_gate_check_without_the_marina_environment_writes_nothing_and_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = self._coordinator_world(tmp)
+            fx.environ = {"CLAUDE_CODE_SESSION_ID": COORD_SID}
+            payload = self._gate_inicia(fx)
+            self.assertFalse(payload["allowed"])
+            self.assertEqual(payload["reasons"],
+                             ["unknown working session with cwd in the new node's targets: 'marina (11)'"])
+            self.assertFalse((fx.kit / ".agent-state" / "demo" / "coordinator.toml").exists())
+
+    def test_registration_failure_never_fails_the_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = self._coordinator_world(tmp)
+            fx.environ = {"CLAUDE_CODE_AGENT": "marina", "CLAUDE_CODE_SESSION_ID": COORD_SID}
+
+            def broken_ppid() -> int:
+                raise OSError("no parent")
+
+            fx.getppid = broken_ppid
+            error, payload = call(fx.server(), "next_nn", project="demo", task="t1")
+            self.assertFalse(error, payload)
+            self.assertEqual(payload, {"next_nn": 1})
+            self.assertFalse((fx.kit / ".agent-state" / "demo" / "coordinator.toml").exists())
 
     def test_decision_preview_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
