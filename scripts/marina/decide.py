@@ -58,6 +58,15 @@ _CLOSED_BY_STATUS = {
 }
 
 
+def closed_state(status: str) -> str:
+    """The G2 state that closes a validated node whose receipt has `status`.
+
+    Shared by `marina run` and `marina accept`; `KeyError` for an unknown status.
+    """
+
+    return _CLOSED_BY_STATUS[status]
+
+
 class MissingObservation(ValueError):
     """The caller did not supply an observation this state needs."""
 
@@ -371,7 +380,7 @@ def _decide_for_state(doc: StateDoc, env: Envelope, current: Assignment, obs: Ob
     if state == "receipt_validated":
         if current.receipt_summary is None:
             return _stop("receipt_summary_missing")
-        return Decision("transition", nn=nn, to=_CLOSED_BY_STATUS[current.receipt_summary.status])
+        return Decision("transition", nn=nn, to=closed_state(current.receipt_summary.status))
     if state == "accepted":
         if effective_edge(doc, current) == "revisa":
             return _after_reviewer(doc, env, current, obs)

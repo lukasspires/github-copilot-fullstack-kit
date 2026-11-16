@@ -11,7 +11,8 @@ Tools (docs/plano-f5-servidor-mcp-2026-10.md):
   `next_nn`, `gate_check`, `decision_preview`, `handoff_validate`;
 - write and action: `envelope_draft` (always clears the approval),
   `state_reserve`, `launch_node`, `run_start` (refuses without a valid
-  approval), `run_stop`.
+  approval), `run_stop`, `node_accept` (`marina accept`; it refuses by
+  itself under a live run lock, scripts/marina/accept.py).
 
 No tool approves an envelope: only `marina go` or `marina approve` on a TTY does. The kit
 root is the server's own and never a tool argument; `project`/`task` must
@@ -37,7 +38,7 @@ from typing import Any, Callable, TextIO
 
 from scripts import common, gate, handoff_sync, launch_claude, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import runner
+from scripts.marina import accept, runner
 from scripts.state import StateDoc, StateError, add_assignment, dumps_state, read_state
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -105,6 +106,8 @@ _TOOLS: list[tuple[str, str, dict, list[str], bool]] = [
      {"interval": {"type": "number"}, "max_duration": {"type": "string"}, "notify_cmd": {"type": "string"}},
      ["interval", "max_duration"], False),
     ("run_stop", "Ask a running marina run to stop at its next iteration.", {}, [], False),
+    ("node_accept", "Close one node launched outside a run the way marina run would (finished, git-after, "
+     "receipt lint, closed state).", {"nn": {"type": "integer"}}, ["nn"], False),
 ]
 _JSON_TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "array": list, "object": dict}
 
@@ -404,6 +407,14 @@ class Server:
     def _tool_run_stop(self, project: str, task: str) -> Any:
         requested = runner.request_stop(self._state_path(project, task))
         return {"requested": requested}, not requested
+
+    def _tool_node_accept(self, project: str, task: str, nn: int) -> Any:
+        state_path = self._state_path(project, task)
+        result = accept.accept_node(state_path, nn, kit_root=self.kit_root,
+                                    deps=accept.deps_from_runner(self.deps.runner_deps(self.kit_root)))
+        payload = {"transitions": list(result.transitions), "final_state": result.final_state,
+                   "refused": result.refused}
+        return payload, result.refused is not None
 
 
 def _error(msg_id: Any, code: int, message: str) -> dict:

@@ -19,6 +19,10 @@ Subcommands:
 - `watch <project> <task> [--once]` (F8): the read-only terminal view of
   the task (scripts/marina/watch.py); `go` opens it after dispatching
   unless `--no-watch`.
+- `accept <project> <task> <nn>`: closes one node launched by the manual
+  procedure the way `run` would (scripts/marina/accept.py); prints
+  `nn=NN -> <state>` per transition or `refused: <reason>`, and exits 0
+  only when the node ends `accepted`.
 - `mcp` (F5): the stdio MCP server for interactive Marina
   (scripts/marina/mcp_server.py); stdout carries only JSON-RPC.
 """
@@ -34,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
-from scripts.marina import envelope, hooks, mcp_server, runner, watch
+from scripts.marina import accept, envelope, hooks, mcp_server, runner, watch
 from scripts.state import StateError, read_state
 
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
@@ -66,12 +70,14 @@ def _parser() -> argparse.ArgumentParser:
     watch_cmd.add_argument("--manager-interval", type=float, default=10.0, help="seconds between manager polls")
     status = commands.add_parser("status", help="show a task's lock, envelope and nodes")
     stop = commands.add_parser("stop", help="ask a running `marina run` to stop at its next iteration")
+    accept_cmd = commands.add_parser("accept", help="close one finished node the way `marina run` would")
     mcp = commands.add_parser("mcp", help="serve the MCP stdio server for interactive Marina")
     mcp.add_argument("--kit-root", default=str(_DEFAULT_KIT_ROOT))
-    for sub in (approve, go, watch_cmd, run, status, stop):
+    for sub in (approve, go, watch_cmd, run, status, stop, accept_cmd):
         sub.add_argument("project")
         sub.add_argument("task")
         sub.add_argument("--kit-root", default=str(_DEFAULT_KIT_ROOT))
+    accept_cmd.add_argument("nn", type=int)
     return parser
 
 
@@ -237,6 +243,28 @@ def _run_stop(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO) -> in
     return 0
 
 
+def _run_accept(args: argparse.Namespace, *, stdout: TextIO, stderr: TextIO,
+                deps: runner.RunnerDeps | None) -> int:
+    state_path = _state_path(args, stderr)
+    if state_path is None:
+        return 1
+    kit_root = Path(args.kit_root)
+    try:
+        result = accept.accept_node(state_path, args.nn, kit_root=kit_root,
+                                    deps=accept.deps_from_runner(deps or runner.default_deps(kit_root)))
+    except (StateError, OSError) as exc:
+        print(f"marina accept: {exc}", file=stderr)
+        return 1
+    if result.refused is not None:
+        print(f"refused: {result.refused}", file=stdout)
+        return 1
+    for to in result.transitions:
+        print(f"nn={args.nn:02d} -> {to}", file=stdout)
+    if not result.transitions:
+        print(f"nn={args.nn:02d} already {result.final_state}; nothing to do", file=stdout)
+    return 0 if result.final_state == "accepted" else 1
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -263,6 +291,8 @@ def main(
         return mcp_server.serve(stdin, stdout, kit_root=Path(args.kit_root), deps=mcp_server.default_mcp_deps())
     if args.command == "run":
         return _run_run(args, stdout=stdout, stderr=stderr, deps=deps)
+    if args.command == "accept":
+        return _run_accept(args, stdout=stdout, stderr=stderr, deps=deps)
     if isatty is None:
         isatty = lambda: stdin.isatty() and stdout.isatty()  # noqa: E731
     if args.command == "go":

@@ -335,5 +335,66 @@ class BinWrapperTests(unittest.TestCase):
             self.assertEqual(_state_path(kit).read_bytes(), before)
 
 
+class AcceptCliTests(unittest.TestCase):
+    def _accept(self, kit: Path, result, nn: str = "1") -> tuple[int, str, str, list]:
+        from scripts.marina import accept
+
+        calls = []
+
+        def fake_accept(state_path, nn, **kwargs):
+            calls.append((state_path, nn, kwargs))
+            return result
+
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(accept, "accept_node", fake_accept):
+            code = cli.main(["accept", "demo", "t1", nn, "--kit-root", str(kit)], stdin=io.StringIO(""),
+                            stdout=out, stderr=err, deps=FakeRunnerDeps())
+        return code, out.getvalue(), err.getvalue(), calls
+
+    def test_accepted_prints_each_transition_and_exits_0(self):
+        from scripts.marina import accept
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            result = accept.AcceptResult(["finished", "receipt_received", "receipt_validated", "accepted"],
+                                         "accepted", None)
+            with mock.patch.object(accept, "deps_from_runner", lambda deps: "accept-deps"):
+                code, out, _, calls = self._accept(kit, result)
+            self.assertEqual(code, 0)
+            self.assertEqual(out.splitlines(), ["nn=01 -> finished", "nn=01 -> receipt_received",
+                                                "nn=01 -> receipt_validated", "nn=01 -> accepted"])
+            state_path, nn, kwargs = calls[0]
+            self.assertEqual((state_path, nn, kwargs["kit_root"], kwargs["deps"]),
+                             (_state_path(kit), 1, kit, "accept-deps"))
+
+    def test_refusal_prints_reason_and_exits_1(self):
+        from scripts.marina import accept
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            with mock.patch.object(accept, "deps_from_runner", lambda deps: None):
+                code, out, _, _ = self._accept(kit, accept.AcceptResult([], "working", "session still working"))
+            self.assertEqual(code, 1)
+            self.assertEqual(out.splitlines(), ["refused: session still working"])
+
+    def test_other_closed_state_exits_1(self):
+        from scripts.marina import accept
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            with mock.patch.object(accept, "deps_from_runner", lambda deps: None):
+                code, out, _, _ = self._accept(kit, accept.AcceptResult(["closed_pending"], "closed_pending", None))
+            self.assertEqual(code, 1)
+            self.assertEqual(out.splitlines(), ["nn=01 -> closed_pending"])
+
+    def test_bad_nn_exit_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            with contextlib.redirect_stderr(io.StringIO()):
+                code = cli.main(["accept", "demo", "t1", "x", "--kit-root", str(kit)], stdin=io.StringIO(""),
+                                stdout=io.StringIO(), stderr=io.StringIO())
+            self.assertEqual(code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

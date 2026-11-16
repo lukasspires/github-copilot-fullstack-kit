@@ -187,6 +187,23 @@ def live_lock_pid(task_dir: Path, *, pid_alive: Callable[[int], bool] | None = N
     return pid if isinstance(pid, int) and pid_alive(pid) else None
 
 
+def git_after_path(task_dir: Path, nn: int) -> Path:
+    """Where a writer's `git-after-NN.txt` lives."""
+
+    return Path(task_dir) / f"git-after-{nn:02d}.txt"
+
+
+def git_after_text(a: Assignment, env: env_mod.Envelope | None, git_snapshot: Callable[[str], str]) -> str:
+    """`git-after` content for writer `a`: one `git_snapshot` per target, concatenated.
+
+    The targets are the envelope's, in envelope order (F7), or the node's own
+    when the task has no envelope (manual procedure).
+    """
+
+    targets = env.targets if env is not None else a.targets
+    return "".join(git_snapshot(t) for t in targets)
+
+
 def run_argv(kit_root: Path, project: str, task: str, *, interval: float, max_duration: str,
              notify_cmd: str | None) -> list[str]:
     """The detached `marina run` command line, as `run_start` and `marina go` spawn it."""
@@ -340,10 +357,9 @@ class _Run:
         current = max(doc.assignments, key=lambda a: a.nn, default=None)
         if current is None or mode_for_role(current.role) != "writer" or current.state not in _BEFORE_ACCEPTANCE:
             return
-        path = self.task_dir / f"git-after-{current.nn:02d}.txt"
+        path = git_after_path(self.task_dir, current.nn)
         if not path.exists():
-            targets = env.targets if env is not None else current.targets
-            path.write_text("".join(self.deps.git_snapshot(t) for t in targets), encoding="utf-8")
+            path.write_text(git_after_text(current, env, self.deps.git_snapshot), encoding="utf-8")
 
     def _observations(self, doc: StateDoc, env: env_mod.Envelope | None, manager_match: str | None) -> Observations:
         if env is None:
@@ -432,7 +448,7 @@ class _Run:
         if not writers:
             return ""
         previous = max(writers, key=lambda a: a.nn)
-        path = self.task_dir / f"git-after-{previous.nn:02d}.txt"
+        path = git_after_path(self.task_dir, previous.nn)
         if not path.exists():
             return "git_after_missing"
         current = "".join(self.deps.git_snapshot(t) for t in env.targets)
