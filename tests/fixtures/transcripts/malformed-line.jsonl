@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-11-12T19:00:00.000Z","message":{"role":"user","content":"synthetic prompt"}}
+{"type":"assistant","timestamp":"2026-11-12T19:12:00.000Z","isApiErrorMessage":true,"error":"rate_limit","apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"resetsAt":1794523800}},"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your 5-hour limit · resets 7:50pm (America/Sao_Paulo)"}]}}
+{"type":"system","subtype":"turn_dur
+not json at all
+{"type":"cost-state","timestamp":"2026-11-12T19:12:01.000Z"}

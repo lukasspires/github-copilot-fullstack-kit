@@ -25,6 +25,23 @@ Choices from docs/plano-f4-runner-e-juiza-2026-10.md:
 - F7: `git-after-NN.txt` and the Git gate cover every envelope target, in
   envelope order, so a foreign change in another stage's target also stops
   the run; `run_argv`/`spawn_detached` are shared by `run_start` and `go`.
+- limite-uso, stage 1: when the current node ends without a usable receipt,
+  its manager item (`native.id` → `sessionId`) locates the transcript under
+  `RunnerDeps.projects_root` and `usage_limit.detect` feeds
+  `Observations.usage_limit`; a `usage_limit:` stop runs `--notify-cmd`
+  with `MARINA_EVENT=usage_limit_stop`. Every notification carries
+  `MARINA_EVENT`, `MARINA_TASK`, `MARINA_NN` and `MARINA_REASON`
+  (sanitized, at most 200 characters) in the child's environment.
+- limite-uso, stage 2 (architect decisions 3–6): `Observations` carry the
+  wall clock (`deps.now()`) and the run's wall-clock deadline; under
+  `on_usage_limit = "wait"` the run waits in its own process, holding the
+  lock (`marina stop` and `--recover` work as usual), logging and notifying
+  (`usage_limit_wait`) only on entering the wait, then opens the
+  `substitui` through the same path as any node: its Git gate compares with
+  the replaced writer's `git-after-NN.txt`, its handoff comes from
+  `handoff_gen.render_replacement_handoff`, its `reserved` event carries
+  the audit note, and the reopening is logged, notified
+  (`usage_limit_resume`) and listed in the checkpoint section.
 
 It never answers a native approval (it may run `--notify-cmd`), never
 retries an `uncertain` launch, never archives or deletes sessions, and
@@ -53,7 +70,7 @@ from typing import Callable
 
 from scripts import common, gate, handoff_sync, launch_claude, preflight, receipt_lint, status_claude
 from scripts.marina import envelope as env_mod
-from scripts.marina import handoff_gen, judge
+from scripts.marina import handoff_gen, judge, usage_limit
 from scripts.marina.decide import Decision, NodeSpec, Observations, Question, decide
 from scripts.state import (
     Assignment, StateDoc, add_assignment, append_event, effective_edge, read_state, reviewed_writer, write_state,
@@ -67,6 +84,7 @@ JUDGE_LEDGER = "judge-calls.jsonl"
 _WRITER_EDGES = (*env_mod.WRITER_STAGE_EDGES, "corrige")
 _OBSERVED_STATES = ("launched", "working", "waiting_approval")
 _BEFORE_ACCEPTANCE = ("finished", "receipt_received", "receipt_validated")
+USAGE_WAIT_PREFIX = "usage_limit until "
 
 
 class RunRefused(RuntimeError):
@@ -81,12 +99,13 @@ class RunnerDeps:
     git_snapshot: Callable[[str], str]
     git_branch: Callable[[str], str]
     judge: Callable[[Question, list[str]], judge.JudgeAnswer]
-    notify: Callable[[str], None]
+    notify: Callable[[str, dict], None]
     sleep: Callable[[float], None]
     monotonic: Callable[[], float]
     now: Callable[[], datetime.datetime]
     pid_alive: Callable[[int], bool]
     getpid: Callable[[], int]
+    projects_root: Path = dataclasses.field(default_factory=usage_limit.default_projects_root)
 
 
 @dataclasses.dataclass
@@ -107,8 +126,28 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _run_notify(command: str) -> None:
-    subprocess.run(shlex.split(command), stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+NOTIFY_REASON_MAX = 200
+
+
+def _sanitize(value: object, limit: int) -> str:
+    return "".join(ch for ch in str(value) if ch.isprintable())[:limit]
+
+
+def notify_env(event: dict) -> dict[str, str]:
+    """The `MARINA_*` variables a `--notify-cmd` child receives for `event` — enumerated fields only."""
+
+    nn = event.get("nn")
+    return {
+        "MARINA_EVENT": _sanitize(event.get("event", ""), 40),
+        "MARINA_TASK": _sanitize(event.get("task", ""), 80),
+        "MARINA_NN": f"{nn:02d}" if isinstance(nn, int) else "",
+        "MARINA_REASON": _sanitize(event.get("reason", ""), NOTIFY_REASON_MAX),
+    }
+
+
+def _run_notify(command: str, event: dict) -> None:
+    subprocess.run(shlex.split(command), stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False,
+                   env={**os.environ, **notify_env(event)})
 
 
 def default_deps(kit_root: Path) -> RunnerDeps:
@@ -293,6 +332,12 @@ class _Run:
         self.judge_note = ""
         self.reconciled_id: str | None = None
         self.envelope_sha = ""
+        # native.id -> transcript sessionId, from the manager items `_observe` reads.
+        self.session_ids: dict[str, str] = {}
+        # Wall-clock end of the run (None for a preview), and usage-limit waits already logged.
+        self.deadline: datetime.datetime | None = None
+        self.usage_waits: set[int] = set()
+        self.reopenings: list[str] = []
 
     # -- records ---------------------------------------------------------------
 
@@ -336,6 +381,7 @@ class _Run:
                 return None
             matches = status_claude.find_task_sessions(sessions, native_id=current.native.id)
             if len(matches) == 1:
+                self._remember_session(current.native.id, matches[0])
                 status_claude.record_observed_transition(
                     str(self.state_path), current.nn, status_claude.classify_session(matches[0]),
                     at=self.deps.now(), session=matches[0],
@@ -352,6 +398,30 @@ class _Run:
                 return "found"
             return "absent" if not matches else None
         return None
+
+    def _remember_session(self, native_id: str, session: dict) -> None:
+        sid = session.get("sessionId")
+        if isinstance(sid, str) and sid:
+            self.session_ids[native_id] = sid
+
+    def _usage_limit(self, a: Assignment) -> usage_limit.UsageLimit | None:
+        """The usage limit in `a`'s transcript; None when unknown (never raises)."""
+
+        native_id = a.native.id
+        if not native_id:
+            return None
+        if native_id not in self.session_ids:
+            try:
+                matches = status_claude.find_task_sessions(self.deps.list_sessions(), native_id=native_id)
+            except Exception:  # noqa: BLE001 — an unavailable manager only means "no observation"
+                return None
+            if len(matches) != 1:
+                return None
+            self._remember_session(native_id, matches[0])
+        sid = self.session_ids.get(native_id)
+        if sid is None:
+            return None
+        return usage_limit.detect(sid, self.deps.projects_root, local_tz=self.deps.now().tzinfo)
 
     def _write_git_after(self, doc: StateDoc, env: env_mod.Envelope | None) -> None:
         current = max(doc.assignments, key=lambda a: a.nn, default=None)
@@ -373,15 +443,19 @@ class _Run:
         self.envelope_sha = sha
         branches = {t: self.deps.git_branch(t) for t in env.targets}
         current = max(doc.assignments, key=lambda a: a.nn, default=None)
-        receipt_exists = receipt_lint_result = None
+        receipt_exists = receipt_lint_result = limit = None
         notified = False
         if current is not None:
             receipt = self.kit_root / current.receipt
             if current.state == "finished":
                 receipt_exists = receipt.is_file()
+                if not receipt_exists:
+                    limit = self._usage_limit(current)
             elif current.state == "receipt_received":
                 lint_errors, summary = receipt_lint.lint_file(receipt, handoff=self.kit_root / current.handoff)
                 receipt_lint_result = (tuple(lint_errors), summary)
+                if lint_errors:
+                    limit = self._usage_limit(current)
             elif current.state == "waiting_approval":
                 notified = self._waiting_key(current) in self.notified
         ledger = self._ledger()
@@ -405,6 +479,9 @@ class _Run:
             notified=notified,
             judge_calls_used=len(ledger),
             judge_answer=judge_answer,
+            usage_limit=limit,
+            now=self.deps.now(),
+            deadline=self.deadline,
         )
 
     @staticmethod
@@ -443,18 +520,27 @@ class _Run:
                                      judge_answer=(question, answer.decision))
         return decide(doc, env, follow)
 
-    def _git_gate(self, doc: StateDoc, env: env_mod.Envelope) -> str:
-        writers = [a for a in doc.assignments if effective_edge(doc, a) in _WRITER_EDGES and a.state == "accepted"]
-        if not writers:
-            return ""
-        previous = max(writers, key=lambda a: a.nn)
-        path = git_after_path(self.task_dir, previous.nn)
+    def _git_gate(self, doc: StateDoc, env: env_mod.Envelope, node: NodeSpec) -> str:
+        if node.edge == "substitui":
+            # The replaced writer's partial work is its git-after; anything else
+            # changed the targets meanwhile (architect decision 5), also for `inicia`.
+            path = git_after_path(self.task_dir, node.predecessor)
+        else:
+            writers = [a for a in doc.assignments if effective_edge(doc, a) in _WRITER_EDGES and a.state == "accepted"]
+            if not writers:
+                return ""
+            path = git_after_path(self.task_dir, max(writers, key=lambda a: a.nn).nn)
         if not path.exists():
             return "git_after_missing"
         current = "".join(self.deps.git_snapshot(t) for t in env.targets)
         return "" if current == path.read_text(encoding="utf-8") else "foreign_change"
 
     def _render(self, doc: StateDoc, env: env_mod.Envelope, a: Assignment, node: NodeSpec) -> str:
+        if node.edge == "substitui":
+            replaced = doc.get_assignment(a.predecessor)
+            replaced_text = (self.kit_root / replaced.handoff).read_text(encoding="utf-8")
+            return handoff_gen.render_replacement_handoff(doc, a, kit_root=self.kit_root,
+                                                          replaced_handoff_text=replaced_text)
         if node.edge == "revisa":
             writer = doc.get_assignment(a.predecessor)
             writer_text = (self.kit_root / writer.handoff).read_text(encoding="utf-8")
@@ -464,11 +550,14 @@ class _Run:
             return handoff_gen.render_correction_handoff(doc, a, kit_root=self.kit_root, template_text=template)
         return handoff_gen.render_stage_handoff(doc, a, kit_root=self.kit_root, template_text=template)
 
-    def _open(self, doc: StateDoc, env: env_mod.Envelope, node: NodeSpec) -> str:
-        """Open one node; returns a stop reason, or "" once launch_claude ran."""
+    def _open(self, doc: StateDoc, env: env_mod.Envelope, node: NodeSpec, reopen_note: str = "") -> str:
+        """Open one node; returns a stop reason, or "" once launch_claude ran.
+
+        `reopen_note` (a usage-limit `substitui`) is the `reserved` event's audit note.
+        """
 
         if mode_for_role(node.role) == "writer":
-            refused = self._git_gate(doc, env)
+            refused = self._git_gate(doc, env, node)
             if refused:
                 return refused
         result = gate.evaluate_gate(
@@ -479,7 +568,12 @@ class _Run:
         )
         if not result.allowed:
             return f"gate_refused: {result.reasons[0]}"
-        by, note = ("marina-judge", self.judge_note) if self.judge_note else ("marina-run", f"stage {node.stage}")
+        if reopen_note:
+            by, note = "marina-run", reopen_note
+        elif self.judge_note:
+            by, note = "marina-judge", self.judge_note
+        else:
+            by, note = "marina-run", f"stage {node.stage}"
         self.judge_note = ""
         a = add_assignment(
             doc, role=node.role, type_=node.type, edge=node.edge, predecessor=node.predecessor,
@@ -495,6 +589,12 @@ class _Run:
         )
         self.log(f"opened nn={a.nn:02d} {a.role} {a.edge}: " + (f"id={launch.session_id}" if launch.ok else
                                                               "; ".join(launch.reasons)[:300]))
+        if reopen_note:
+            resume = f"usage_limit resume nn={node.predecessor:02d} → nn={a.nn:02d}"
+            self.log(resume)
+            resets_at = reopen_note.split("resets_at=", 1)[-1].split(";", 1)[0]
+            self.reopenings.append(f"nn={node.predecessor:02d}→nn={a.nn:02d} (resets_at {resets_at})")
+            self._notify("usage_limit_resume", doc, a.nn, resume)
         return ""
 
     # -- loop ------------------------------------------------------------------
@@ -518,25 +618,43 @@ class _Run:
         decision = decide(doc, env, obs)
         if decision.kind == "ask_judge":
             decision = self._ask_judge(doc, env, obs, decision.question)
-        self.log(f"{decision.kind} nn={decision.nn or '-'} {decision.to or decision.reason}".rstrip())
+        usage_wait = decision.kind == "wait" and decision.reason.startswith(USAGE_WAIT_PREFIX)
+        if usage_wait:
+            # Logged and notified once per entry into the wait, not every interval.
+            if decision.nn not in self.usage_waits:
+                self.usage_waits.add(decision.nn)
+                self.log(f"usage_limit wait nn={decision.nn:02d} until {decision.reason[len(USAGE_WAIT_PREFIX):]}")
+                self._notify("usage_limit_wait", doc, decision.nn, decision.reason)
+        else:
+            self.log(f"{decision.kind} nn={decision.nn or '-'} {decision.to or decision.reason}".rstrip())
         if decision.kind == "wait":
             if decision.notify:
                 current = max(doc.assignments, key=lambda a: a.nn)
                 self.notified.add(self._waiting_key(current))
-                if self.notify_cmd:
-                    try:
-                        self.deps.notify(self.notify_cmd)
-                    except Exception as exc:  # noqa: BLE001 — a notifier failure never stops the run
-                        self.log(f"notify failed: {exc}")
+                self._notify("waiting_approval", doc, current.nn, "waiting_approval")
             self.deps.sleep(self.interval)
             return None
         if decision.kind == "transition":
             self._transition(decision)
             return None
         if decision.kind == "launch":
-            refused = self._open(doc, env, decision.node)
+            reopen_note = decision.reason if decision.node.edge == "substitui" else ""
+            refused = self._open(doc, env, decision.node, reopen_note)
             return Decision("stop", reason=refused) if refused else None
+        if decision.kind == "stop" and decision.reason.startswith("usage_limit:"):
+            current = max(doc.assignments, key=lambda a: a.nn, default=None)
+            self._notify("usage_limit_stop", doc, current.nn if current is not None else None, decision.reason)
         return decision
+
+    def _notify(self, event: str, doc: StateDoc, nn: int | None, reason: str) -> None:
+        """Run `--notify-cmd` with the event in its environment; a failure is only logged."""
+
+        if not self.notify_cmd:
+            return
+        try:
+            self.deps.notify(self.notify_cmd, {"event": event, "task": doc.task.slug, "nn": nn, "reason": reason})
+        except Exception as exc:  # noqa: BLE001 — a notifier failure never stops the run
+            self.log(f"notify failed: {exc}")
 
 
 def preview_decision(state_path: Path, *, kit_root: Path, deps: RunnerDeps) -> Decision:
@@ -591,7 +709,8 @@ def _append_checkpoint(run: _Run, doc: StateDoc, *, started: datetime.datetime, 
         f"- Envelope: sha256 `{run.envelope_sha or '—'}`; intervalo {interval:g}s; duração efetiva {effective:g}s.\n"
         f"- Nós criados: {nodes}.\n"
         f"- Decisões da juíza: {judged}.\n"
-        f"- Motivo de parada: {stop}.\n"
+        + (f"- Reaberturas por limite de uso: {', '.join(run.reopenings)}.\n" if run.reopenings else "")
+        + f"- Motivo de parada: {stop}.\n"
         f"- Próxima ação: {action}\n"
     )
     with journal.open("a", encoding="utf-8") as stream:
@@ -627,6 +746,8 @@ def run(
             effective = min(max_duration, env_mod.parse_duration(env.max_duration))
     except env_mod.EnvelopeError:
         pass
+    # Wall clock, for the usage-limit wait (architect E11): the monotonic one stops during suspend.
+    current.deadline = started + datetime.timedelta(seconds=effective)
     final: Decision | None = None
     try:
         while final is None:

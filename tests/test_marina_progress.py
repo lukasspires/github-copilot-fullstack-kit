@@ -243,6 +243,23 @@ class IoAndActivityTests(unittest.TestCase):
             self._transcript(root, ["not json", {"type": "assistant", "message": {"content": "text"}}])
             self.assertIsNone(pg.last_activity("abc-123", root))
 
+    def test_last_activity_reads_only_the_shared_tail(self):
+        # limite-uso: the tail is read by `usage_limit.transcript_tail`, still 256 KiB.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            early = {"type": "assistant", "timestamp": "2026-10-28T21:00:00Z", "message": {"content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/a"}}]}}
+            self._transcript(root, [early, {"type": "user", "message": {"content": "x" * (300 * 1024)}}])
+            self.assertIsNone(pg.last_activity("abc-123", root))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "-kit"
+            folder.mkdir()
+            source = Path(__file__).resolve().parent / "fixtures" / "transcripts" / "limit-then-system.jsonl"
+            (folder / "abc-123.jsonl").write_bytes(source.read_bytes())
+            text, _ = pg.last_activity("abc-123", root)
+        self.assertEqual(text, "Bash python3 -m unittest tests.test_example")
+
 
 class ViewTests(unittest.TestCase):
     def _fixture(self, tmp: str, *, envelope: bool = True, analysis: bool = False) -> Path:
@@ -342,6 +359,26 @@ class ViewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             text = "\n".join(pg.render(self._view(self._fixture(tmp), sessions=None), 100))
         self.assertIn("manager indisponível", text)
+
+    def test_render_shows_the_usage_limit_wait_while_the_run_lives(self):
+        # limite-uso stage 2: the current node ended on the limit and a live run holds the lock.
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = self._fixture(tmp)
+            doc = st.read_state(state_path)
+            for to in ("finished", "receipt_missing"):
+                st.set_state(doc, 2, to, by="marina-run", at=AT, note=(
+                    'usage_limit resets_at=2026-10-28T22:00:00+00:00 text="10pm (UTC)"' if to == "receipt_missing"
+                    else ""))
+            st.write_state(state_path, doc)
+            (state_path.parent / ".marina-run.lock").write_text(
+                json.dumps({"pid": 4242, "started_at": AT.isoformat()}), encoding="utf-8")
+            view = lambda alive: pg.build_view(  # noqa: E731
+                state_path, kit_root=state_path.parents[4], now=AT + datetime.timedelta(minutes=8), sessions=[],
+                pid_alive=lambda pid: alive, projects_root=state_path.parent, history_docs=[])
+            live = "\n".join(pg.render(view(True), 100))
+            dead = "\n".join(pg.render(view(False), 100))
+        self.assertIn("aguardando limite de uso até 22:05", live)
+        self.assertNotIn("aguardando limite de uso", dead)
 
     def test_render_respects_width(self):
         with tempfile.TemporaryDirectory() as tmp:

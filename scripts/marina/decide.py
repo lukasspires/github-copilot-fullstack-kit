@@ -28,14 +28,35 @@ whose targets or allowlist differ from that scope is outside the envelope.
 F6 finding A4 (part 1): a `substitui` node that Marina opens for a node in
 `receipt_missing`/`receipt_invalid` stands for that node (same role, type,
 targets and allowlist, once per node), so the run can resume. The runner
-itself never opens one.
+itself never opens one, except under `on_usage_limit = "wait"` (below).
+
+limite-uso, stage 1: a usage limit observed when a node ends without a
+usable receipt (`Observations.usage_limit`) goes into the note of the
+`receipt_missing`/`receipt_invalid` event (after the first lint error for
+the latter); a node in either state whose note records it stops with
+`usage_limit: nn=NN resets <text>` instead of the state name.
+
+limite-uso, stage 2 (architect decisions 3, 4 and 7): with the approved
+envelope's `on_usage_limit = "wait"`, such a node whose note was written by
+`marina-run` or `marina-accept` and names a reset time is reopened once:
+`wait` (reason `usage_limit until <iso>`) while the wall clock
+`Observations.now` is before `resets_at + USAGE_LIMIT_MARGIN`, then
+`launch` of a `substitui` with its role, type and scope (the `Decision`
+reason is the audit note of the `reserved` event). It stops instead, with
+the usage_limit reason plus a suffix, when that moment is not before
+`Observations.deadline` (`(after max_duration)`), when the node is itself a
+`substitui` (`(replacement)`) or when the task already has
+`USAGE_LIMIT_MAX_REOPENS` such reopenings, counted in the state
+(`(max reopens)`); an uninterpreted reset time already reads `(unparsed)`.
 """
 
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime as DateTime, timedelta, timezone
 
 from scripts.gate import find_fail_review_chain
+from scripts.marina import usage_limit
 from scripts.marina.envelope import WRITER_STAGE_EDGES, Envelope, node_scope
 from scripts.state import Assignment, ReceiptSummary, StateDoc, effective_edge
 
@@ -50,6 +71,12 @@ _PREDECESSOR_EDGES = {
 }
 _REPLACEABLE = ("receipt_missing", "receipt_invalid")
 _RUNNING = ("launched", "working")
+# limite-uso stage 2 (decision 4): reopenings by the run per task, counted in the state.
+USAGE_LIMIT_MAX_REOPENS = 2
+REOPEN_BY = "marina-run"
+REOPEN_NOTE_PREFIX = "usage_limit: substitui "
+# Writers of a usage-limit note the run may act on (`marina run`, `marina accept`).
+_LIMIT_NOTE_WRITERS = ("marina-run", "marina-accept")
 _CLOSED_BY_STATUS = {
     "done": "accepted",
     "pending": "closed_pending",
@@ -100,6 +127,10 @@ class Observations:
     notified: bool = False
     judge_calls_used: int = 0
     judge_answer: tuple[Question, str] | None = None
+    usage_limit: usage_limit.UsageLimit | None = None
+    # Wall clock (architect E11) and the run's wall-clock deadline; None for no deadline.
+    now: DateTime | None = None
+    deadline: DateTime | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -352,6 +383,65 @@ def _after_reviewer(doc: StateDoc, env: Envelope, reviewer: Assignment, obs: Obs
 # --------------------------------------------------------------------------
 
 
+def _state_event(a: Assignment):
+    """The event that put `a` in its current state, or None."""
+
+    return next((event for event in reversed(a.events) if event.to == a.state), None)
+
+
+def recorded_usage_limit(a: Assignment) -> usage_limit.UsageLimit | None:
+    """The usage limit recorded in the note of the event that put `a` in its current state."""
+
+    event = _state_event(a)
+    return usage_limit.from_note(event.note) if event is not None else None
+
+
+def is_usage_limit_reopening(a: Assignment) -> bool:
+    """`a` is a `substitui` that `marina run` opened after a usage limit (its `reserved` audit note)."""
+
+    first = a.events[0] if a.events else None
+    return (a.edge == "substitui" and first is not None and first.by == REOPEN_BY
+            and first.note.startswith(REOPEN_NOTE_PREFIX))
+
+
+def reopen_ready_at(limit: usage_limit.UsageLimit) -> DateTime | None:
+    """When the run may reopen a node the limit interrupted: `resets_at + USAGE_LIMIT_MARGIN`."""
+
+    if limit.resets_at is None:
+        return None
+    return limit.resets_at + timedelta(seconds=usage_limit.USAGE_LIMIT_MARGIN)
+
+
+def _after_usage_limit(doc: StateDoc, env: Envelope, current: Assignment, limit: usage_limit.UsageLimit,
+                       obs: Observations) -> Decision:
+    """Stop, wait for the reset, or reopen `current` once as a `substitui` (decisions 3 and 4)."""
+
+    reason = usage_limit.stop_reason(current.nn, limit)
+    event = _state_event(current)
+    if env.on_usage_limit != "wait" or event is None or event.by not in _LIMIT_NOTE_WRITERS:
+        return _stop(reason)
+    if current.edge == "substitui":
+        return _stop(f"{reason} (replacement)")
+    ready_at = reopen_ready_at(limit)
+    if ready_at is None:
+        return _stop(reason)  # `describe` already says "(unparsed)"
+    if sum(1 for a in doc.assignments if is_usage_limit_reopening(a)) >= USAGE_LIMIT_MAX_REOPENS:
+        return _stop(f"{reason} (max reopens)")
+    if obs.now is None:
+        raise MissingObservation(f"nn={current.nn} {current.state}: now is required with on_usage_limit = wait")
+    if obs.deadline is not None and ready_at >= obs.deadline:
+        return _stop(f"{reason} (after max_duration)")
+    if obs.now < ready_at:
+        return Decision("wait", nn=current.nn, reason=f"usage_limit until {ready_at.isoformat()}")
+    targets, allowlist = expected_scope(doc, env, current)
+    node = NodeSpec(current.role, current.type, "substitui", current.nn, targets, allowlist,
+                    stage_of(doc, current.nn))
+    waited = max(int((obs.now - event.at).total_seconds()), 0)
+    note = (f"{REOPEN_NOTE_PREFIX}nn={current.nn:02d}; "
+            f"resets_at={limit.resets_at.astimezone(timezone.utc).isoformat()}; esperou {waited}s")
+    return Decision("launch", node=node, reason=note)
+
+
 def _decide_for_state(doc: StateDoc, env: Envelope, current: Assignment, obs: Observations) -> Decision:
     state, nn = current.state, current.nn
     if state in ("reserved", "prepared"):
@@ -369,14 +459,21 @@ def _decide_for_state(doc: StateDoc, env: Envelope, current: Assignment, obs: Ob
     if state == "finished":
         if obs.receipt_exists is None:
             raise MissingObservation(f"nn={nn} finished: receipt_exists is required")
-        return Decision("transition", nn=nn, to="receipt_received" if obs.receipt_exists else "receipt_missing")
+        if obs.receipt_exists:
+            return Decision("transition", nn=nn, to="receipt_received")
+        return Decision("transition", nn=nn, to="receipt_missing", reason=usage_limit.with_note("", obs.usage_limit))
     if state == "receipt_received":
         if obs.receipt_lint is None:
             raise MissingObservation(f"nn={nn} receipt_received: receipt_lint is required")
         errors, summary = obs.receipt_lint
         if errors:
-            return Decision("transition", nn=nn, to="receipt_invalid", reason=errors[0])
+            return Decision("transition", nn=nn, to="receipt_invalid",
+                            reason=usage_limit.with_note(errors[0], obs.usage_limit))
         return Decision("transition", nn=nn, to="receipt_validated", receipt_summary=summary)
+    if state in _REPLACEABLE:
+        limit = recorded_usage_limit(current)
+        if limit is not None:
+            return _after_usage_limit(doc, env, current, limit, obs)
     if state == "receipt_validated":
         if current.receipt_summary is None:
             return _stop("receipt_summary_missing")

@@ -1,0 +1,7 @@
+{"type":"user","timestamp":"2026-11-12T19:00:00.000Z","message":{"role":"user","content":"synthetic prompt"}}
+{"type":"assistant","timestamp":"2026-11-12T19:05:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"python3 -m unittest tests.test_example"}}]}}
+{"type":"user","timestamp":"2026-11-12T19:05:10.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"OK"}]}}
+{"type":"assistant","timestamp":"2026-11-12T19:12:00.000Z","isApiErrorMessage":true,"error":"rate_limit","apiError":"usage_limit_reached","apiErrorStatus":429,"apiErrorParams":{"rate_limit_info":{"resetsAt":1794523800,"rateLimitType":"five_hour"}},"quotaLimits":{"resetsAt":1794523800},"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your 5-hour limit · resets 7:50pm (America/Sao_Paulo)"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-11-12T19:12:01.000Z","durationMs":1000}
+{"type":"last-prompt","timestamp":"2026-11-12T19:12:01.000Z"}
+{"type":"cost-state","timestamp":"2026-11-12T19:12:01.000Z"}

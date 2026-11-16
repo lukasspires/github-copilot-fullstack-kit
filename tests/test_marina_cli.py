@@ -387,6 +387,28 @@ class AcceptCliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(out.splitlines(), ["nn=01 -> closed_pending"])
 
+    def test_usage_limit_is_shown(self):
+        from scripts.marina import accept, usage_limit
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _fake_kit(tmp)
+            limit = usage_limit.UsageLimit("7:50pm (America/Sao_Paulo)", NOW)
+            unparsed = usage_limit.UsageLimit("7:50pm (Mars/Olympus)", None)
+            with mock.patch.object(accept, "deps_from_runner", lambda deps: None):
+                code, out, _, _ = self._accept(kit, accept.AcceptResult(
+                    ["finished", "receipt_missing"], "receipt_missing", None, limit))
+                _, out2, _, _ = self._accept(kit, accept.AcceptResult(
+                    ["receipt_missing"], "receipt_missing", None, unparsed))
+            self.assertEqual(code, 1)
+            self.assertEqual(out.splitlines(), ["nn=01 -> finished", "nn=01 -> receipt_missing",
+                                                "usage limit, resets 7:50pm (America/Sao_Paulo)"])
+            self.assertEqual(out2.splitlines()[-1], "usage limit, resets 7:50pm (Mars/Olympus) (unparsed)")
+
+    def test_notify_help_names_the_environment(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            cli._parser().parse_args(["run", "--help"])
+        self.assertIn("MARINA_EVENT", " ".join(out.getvalue().split()))
+
     def test_bad_nn_exit_1(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = _fake_kit(tmp)
