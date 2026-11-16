@@ -29,7 +29,7 @@ ROLE = "node-backend"
 TEMPLATE = "## Objective\n\nDo it.\n\n## Write scope\n\n`src/`\n\n## Acceptance criteria\n\n1. Works.\n"
 READ_TOOLS = {"task_status", "envelope_show", "sessions", "next_nn", "gate_check", "decision_preview",
               "handoff_validate"}
-ACTION_TOOLS = {"envelope_draft", "state_reserve", "launch_node", "run_start", "run_stop"}
+ACTION_TOOLS = {"envelope_draft", "state_reserve", "launch_node", "run_start", "run_stop", "node_accept"}
 
 
 class Fixture:
@@ -160,7 +160,7 @@ class ProtocolTests(unittest.TestCase):
             responses = [json.loads(line) for line in out.getvalue().splitlines()]
             self.assertEqual(responses[0]["error"]["code"], -32700)
             self.assertEqual(responses[1]["id"], 2)
-            self.assertEqual(len(responses[2]["result"]["tools"]), 12)
+            self.assertEqual(len(responses[2]["result"]["tools"]), len(READ_TOOLS | ACTION_TOOLS))
 
     def test_unknown_method_and_tool(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -402,6 +402,37 @@ class ActionToolTests(unittest.TestCase):
             fx.launch_result = mock.Mock(ok=False, session_id=None, reasons=["preflight failed"], notes=[])
             self.assertTrue(call(fx.server(), "launch_node", project="demo", task="t1", nn=1)[0])
 
+    def test_node_accept_returns_the_result(self):
+        from scripts.marina import accept
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = Fixture(tmp)
+            calls = []
+
+            def fake_accept(state_path, nn, **kwargs):
+                calls.append((state_path, nn, kwargs))
+                return accept.AcceptResult(["finished", "receipt_received", "receipt_validated", "accepted"],
+                                           "accepted", None)
+
+            with mock.patch.object(accept, "accept_node", fake_accept):
+                error, payload = call(fx.server(), "node_accept", project="demo", task="t1", nn=1)
+            self.assertFalse(error, payload)
+            self.assertEqual(payload, {"transitions": ["finished", "receipt_received", "receipt_validated", "accepted"],
+                                       "final_state": "accepted", "refused": None})
+            state_path, nn, kwargs = calls[0]
+            self.assertEqual((state_path, nn, kwargs["kit_root"]), (fx.state_path, 1, fx.kit))
+            self.assertIsInstance(kwargs["deps"], accept.AcceptDeps)
+
+    def test_node_accept_refusal_is_an_error_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = Fixture(tmp)
+            before = fx.state_path.read_bytes()
+            error, payload = call(fx.server(), "node_accept", project="demo", task="t1", nn=1)
+            self.assertTrue(error)
+            self.assertEqual(payload["transitions"], [])
+            self.assertIn("nn=1", payload["refused"])
+            self.assertEqual(fx.state_path.read_bytes(), before)
+
     def test_run_start_spawns_cli(self):
         with tempfile.TemporaryDirectory() as tmp:
             fx = Fixture(tmp)
@@ -524,7 +555,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         responses = [json.loads(line) for line in proc.stdout.splitlines()]
         self.assertEqual([r["id"] for r in responses], [1, 2])
-        self.assertEqual(len(responses[1]["result"]["tools"]), 12)
+        self.assertEqual(len(responses[1]["result"]["tools"]), len(READ_TOOLS | ACTION_TOOLS))
 
 
 if __name__ == "__main__":
