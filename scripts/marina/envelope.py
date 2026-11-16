@@ -19,6 +19,11 @@ as planned in docs/plano-f3-envelope-e-decide-2026-10.md:
   of every stage handoff, so editing a handoff after approval invalidates
   it.
 
+limite-uso stage 2: the optional `on_usage_limit = "stop" | "wait"` (default
+"stop") is the human approval for `marina run` to reopen, once, a node a
+usage limit interrupted; it is emitted only as "wait", so the hash of an
+envelope without it is the one approved before the key existed.
+
 "Schema v1" is the envelope's own first version inside a `schema = 1`
 `state.toml` (plan decision 2). Library only; `approve` (the one writer)
 lives here too and is reached through `marina approve`, and since F7
@@ -45,6 +50,10 @@ REVIEW_MODES = ("each_stage", "final")
 # Edges that open a stage's writer; `encadeia` changes role (F7).
 WRITER_STAGE_EDGES = ("inicia", "prossegue", "encadeia")
 PASS_WITH_RISKS_POLICIES = ("accept", "judge", "stop")
+# limite-uso stage 2 (R1): optional; absent means "stop", and only "wait" is
+# emitted back, so envelopes without the key keep their approval hash.
+ON_USAGE_LIMIT_POLICIES = ("stop", "wait")
+_OPTIONAL_KEYS = ("approval", "on_usage_limit")
 
 _REQUIRED_KEYS = (
     "targets",
@@ -95,6 +104,7 @@ class Envelope:
     on_pass_with_risks: str
     stages: tuple[Stage, ...]
     approval: Approval | None = None
+    on_usage_limit: str = "stop"
 
 
 # --------------------------------------------------------------------------
@@ -172,7 +182,7 @@ def parse_envelope(raw: dict) -> Envelope:
 
     if not isinstance(raw, dict):
         raise EnvelopeError("[envelope] must be a table")
-    unknown = sorted(set(raw) - set(_REQUIRED_KEYS) - {"approval"})
+    unknown = sorted(set(raw) - set(_REQUIRED_KEYS) - set(_OPTIONAL_KEYS))
     if unknown:
         raise EnvelopeError(f"[envelope] unknown key(s): {', '.join(unknown)}")
     missing = [k for k in _REQUIRED_KEYS if k not in raw]
@@ -183,6 +193,11 @@ def parse_envelope(raw: dict) -> Envelope:
         isinstance(k, str) and isinstance(v, str) for k, v in branches.items()
     ):
         raise EnvelopeError("[envelope] branches must be a table of strings")
+    on_usage_limit = raw.get("on_usage_limit", "stop")
+    if not isinstance(on_usage_limit, str) or on_usage_limit not in ON_USAGE_LIMIT_POLICIES:
+        raise EnvelopeError(
+            f"[envelope] on_usage_limit must be one of {', '.join(ON_USAGE_LIMIT_POLICIES)}, got {on_usage_limit!r}"
+        )
     return Envelope(
         targets=_str_list(raw, "targets"),
         branches=dict(branches),
@@ -194,6 +209,7 @@ def parse_envelope(raw: dict) -> Envelope:
         on_pass_with_risks=_str(raw, "on_pass_with_risks"),
         stages=_parse_stages(raw["stages"]),
         approval=_parse_approval(raw["approval"]) if "approval" in raw else None,
+        on_usage_limit=on_usage_limit,
     )
 
 
@@ -211,6 +227,8 @@ def envelope_to_raw(env: Envelope) -> dict:
         "on_pass_with_risks": env.on_pass_with_risks,
         "stages": [_stage_to_raw(s) for s in env.stages],
     }
+    if env.on_usage_limit != "stop":
+        raw["on_usage_limit"] = env.on_usage_limit
     if env.approval is not None:
         raw["approval"] = {"at": env.approval.at, "sha256": env.approval.sha256}
     return raw
@@ -438,6 +456,8 @@ def format_summary(env: Envelope, doc: StateDoc, sha256: str) -> str:
         f"max_duration: {env.max_duration}",
         f"judge_max_calls: {env.judge_max_calls}",
         f"on_pass_with_risks: {env.on_pass_with_risks}",
+        "on_usage_limit: wait (reabre o nó uma vez, como substitui, depois do horário de volta)"
+        if env.on_usage_limit == "wait" else "on_usage_limit: stop",
         f"sha256: {sha256}",
     ]
     return "\n".join(lines)

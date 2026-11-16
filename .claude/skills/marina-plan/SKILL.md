@@ -26,7 +26,7 @@ All files live in `<kit_root>/.agent-state/<project>/tasks/<task>/`:
   - `Expected inputs` and `Expected outputs` are what `marina watch` shows for the stage.
 
   Each step leaves one reasonable implementation: exact files, names, values and the tests that prove them. Where tests apply, the criteria ask the receipt to show the test failing before the change and passing after it.
-- **`[envelope]`** through `mcp__marina__envelope_draft`: stages with role, handoff, `targets` and `allowlist`; branches; `review`; `max_corrections` (0 or 1); `max_duration`; `judge_max_calls`; `on_pass_with_risks`.
+- **`[envelope]`** through `mcp__marina__envelope_draft`: stages with role, handoff, `targets` and `allowlist`; branches; `review`; `max_corrections` (0 or 1); `max_duration`; `judge_max_calls`; `on_pass_with_risks`; `on_usage_limit` (`"wait"` lets the run wait for the usage-limit reset and reopen the interrupted node once as `substitui`; `"stop"`, the default, stops with `usage_limit`). Propose `"wait"` unless the brief says otherwise, and remind the user that the main session must stay idle while a run waits on a kit-targeted task (gate on the coordinator session).
 
 ## Self-review
 

@@ -618,3 +618,47 @@ class DispatchTests(unittest.TestCase):
             fx = TaskFixture(tmp, envelope=raw_envelope())
             code, _, _, slept = self._dispatch(fx, grace=0)
             self.assertEqual((code, slept), (0, []))
+
+
+# sha256 of `raw_envelope()` with `TEMPLATE` as its one stage handoff, computed
+# before `on_usage_limit` existed (limite-uso stage 2): it must never change.
+APPROVED_HASH = "af11e8b05e35227d03804878b765f50e14382ae025329d05e2af3922235e71e9"
+
+
+class OnUsageLimitTests(unittest.TestCase):
+    """limite-uso stage 2 (R1): `on_usage_limit = "stop" | "wait"`, default "stop"."""
+
+    def test_hash_without_the_key_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp, envelope=raw_envelope())
+            env = env_mod.envelope_from_doc(fx.doc())
+            self.assertEqual(env_mod.compute_hash(env, task_dir=fx.task_dir), APPROVED_HASH)
+            explicit = env_mod.parse_envelope(raw_envelope(on_usage_limit="stop"))
+            self.assertEqual(env_mod.compute_hash(explicit, task_dir=fx.task_dir), APPROVED_HASH)
+            wait = env_mod.parse_envelope(raw_envelope(on_usage_limit="wait"))
+            self.assertNotEqual(env_mod.compute_hash(wait, task_dir=fx.task_dir), APPROVED_HASH)
+
+    def test_default_is_stop_and_only_wait_is_emitted(self):
+        env = env_mod.parse_envelope(raw_envelope())
+        self.assertEqual(env.on_usage_limit, "stop")
+        self.assertNotIn("on_usage_limit", env_mod.envelope_to_raw(env))
+        self.assertNotIn("on_usage_limit", env_mod.envelope_to_raw(env_mod.parse_envelope(
+            raw_envelope(on_usage_limit="stop"))))
+        raw = raw_envelope(on_usage_limit="wait", approval={"at": NOW, "sha256": "a" * 64})
+        wait = env_mod.parse_envelope(raw)
+        self.assertEqual(wait.on_usage_limit, "wait")
+        self.assertEqual(env_mod.envelope_to_raw(wait), raw)
+
+    def test_invalid_value_refused(self):
+        for value in ("later", "WAIT", "", 1, True, ["wait"]):
+            with self.subTest(value=value), self.assertRaisesRegex(EnvelopeError, "on_usage_limit"):
+                env_mod.parse_envelope(raw_envelope(on_usage_limit=value))
+
+    def test_summary_shows_the_choice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = TaskFixture(tmp)
+            wait = env_mod.format_summary(env_mod.parse_envelope(raw_envelope(on_usage_limit="wait")), fx.doc(),
+                                          "c" * 64)
+            stop = env_mod.format_summary(env_mod.parse_envelope(raw_envelope()), fx.doc(), "c" * 64)
+        self.assertIn("on_usage_limit: wait (reabre o nó uma vez, como substitui, depois do horário de volta)", wait)
+        self.assertIn("on_usage_limit: stop", stop)

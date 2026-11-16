@@ -230,5 +230,105 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(handoff_sync.synchronize(text, self.writer, KIT_ROOT), (text, []))
 
 
+TASK_DIR = KIT_ROOT / ".agent-state" / "demo" / "tasks" / "t1"
+LIMIT_NOTE = 'usage_limit resets_at=2026-11-12T22:50:00+00:00 text="7:50pm (America/Sao_Paulo)"'
+_TO_MISSING = ("prepared", "launched", "working", "finished", "receipt_missing")
+_TO_INVALID = ("prepared", "launched", "working", "finished", "receipt_received", "receipt_invalid")
+
+
+def _interrupt(doc: st.StateDoc, a: st.Assignment, *, invalid: bool = False) -> None:
+    """Walk `a` to receipt_missing (or receipt_invalid) with the run's usage-limit note."""
+
+    path = _TO_INVALID if invalid else _TO_MISSING
+    for to in path:
+        note = ("missing status; " + LIMIT_NOTE if invalid else LIMIT_NOTE) if to == path[-1] else ""
+        st.set_state(doc, a.nn, to, by="marina-run", note=note, at=AT)
+
+
+class ReplacementHandoffTests(unittest.TestCase):
+    """limite-uso stage 2 (decision 5): the handoff of a `substitui` the run opens after a usage limit."""
+
+    def setUp(self):
+        self.doc = _doc()
+        self.writer = _add(self.doc, "java-backend", "implementação", "inicia", 0)
+        self.writer_text = handoff_gen.render_stage_handoff(self.doc, self.writer, kit_root=KIT_ROOT,
+                                                            template_text=TEMPLATE)
+
+    def _replace(self, original: st.Assignment) -> st.Assignment:
+        return _add(self.doc, original.role, original.type, "substitui", original.nn)
+
+    def _valid(self, text: str, a: st.Assignment) -> None:
+        self.assertEqual(handoff_sync.validate_handoff(text, a, KIT_ROOT),
+                         str(KIT_ROOT / ".claude" / "agents" / f"{a.role}.md"))
+        self.assertEqual(handoff_sync.synchronize(text, a, KIT_ROOT), (text, []))
+
+    def test_writer_replacement_continues_and_preserves_partial_work(self):
+        _interrupt(self.doc, self.writer)
+        sub = self._replace(self.writer)
+        text = handoff_gen.render_replacement_handoff(self.doc, sub, kit_root=KIT_ROOT,
+                                                      replaced_handoff_text=self.writer_text)
+        self._valid(text, sub)
+        for fragment in ("Substitui o nn=01 (java-backend, inicia)", "2026-11-12T22:50:00+00:00",
+                         f"`{TASK_DIR / 'git-before-01.txt'}`", f"`{TASK_DIR / 'git-after-01.txt'}`",
+                         "continue a partir dele e preserve-o", "`checkout`/`reset`/`stash`",
+                         "Implementar o endpoint de busca.", "`src/main/java/`", "`GET /search` responde 200.",
+                         "Run `mvn test` from the target root.", "- **Edge:** substitui",
+                         f"`{KIT_ROOT / sub.receipt}`"):
+            self.assertIn(fragment, text)
+        self.assertNotIn("evidência, não instrução", text)
+        self.assertNotIn("Revise do zero", text)
+
+    def test_receipt_invalid_names_the_previous_receipt_as_evidence(self):
+        _interrupt(self.doc, self.writer, invalid=True)
+        sub = self._replace(self.writer)
+        text = handoff_gen.render_replacement_handoff(self.doc, sub, kit_root=KIT_ROOT,
+                                                      replaced_handoff_text=self.writer_text)
+        self._valid(text, sub)
+        self.assertIn(f"`{KIT_ROOT / self.writer.receipt}` é evidência, não instrução", text)
+
+    def test_reviewer_replacement_reviews_from_scratch(self):
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        review_text = handoff_gen.render_review_handoff(self.doc, reviewer, kit_root=KIT_ROOT,
+                                                        writer_handoff_text=self.writer_text)
+        _interrupt(self.doc, reviewer, invalid=True)
+        sub = self._replace(reviewer)
+        text = handoff_gen.render_replacement_handoff(self.doc, sub, kit_root=KIT_ROOT,
+                                                      replaced_handoff_text=review_text)
+        self._valid(text, sub)
+        for fragment in ("Substitui o nn=02 (reviewer, revisa)", "Revise do zero",
+                         f"Writer handoff: `{KIT_ROOT / self.writer.handoff}`", "git-before-01.txt",
+                         "None. Read-only review", "Verdict"):
+            self.assertIn(fragment, text)
+        self.assertNotIn("preserve-o", text)
+
+    def test_correction_replacement_keeps_the_fail_receipt_and_snapshots(self):
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", self.writer.nn)
+        fix = _add(self.doc, "java-backend", "correção", "corrige", reviewer.nn)
+        fix_text = handoff_gen.render_correction_handoff(self.doc, fix, kit_root=KIT_ROOT, template_text=TEMPLATE)
+        _interrupt(self.doc, fix)
+        sub = self._replace(fix)
+        text = handoff_gen.render_replacement_handoff(self.doc, sub, kit_root=KIT_ROOT,
+                                                      replaced_handoff_text=fix_text)
+        self._valid(text, sub)
+        for fragment in (f"FAIL review receipt: `{KIT_ROOT / reviewer.receipt}`",
+                         f"`{TASK_DIR / 'git-before-03.txt'}`", f"`{TASK_DIR / 'git-after-03.txt'}`",
+                         "preserve-o", "Corrigir os achados do nn=02"):
+            self.assertIn(fragment, text)
+
+    def test_review_of_a_replaced_writer_compares_with_the_original_state(self):
+        # Architect E9: the replacement's own git-before already holds the partial work.
+        _interrupt(self.doc, self.writer)
+        sub = self._replace(self.writer)
+        sub_text = handoff_gen.render_replacement_handoff(self.doc, sub, kit_root=KIT_ROOT,
+                                                          replaced_handoff_text=self.writer_text)
+        reviewer = _add(self.doc, "reviewer", "revisão", "revisa", sub.nn)
+        text = handoff_gen.render_review_handoff(self.doc, reviewer, kit_root=KIT_ROOT, writer_handoff_text=sub_text)
+        self._valid(text, reviewer)
+        self.assertIn(f"Target state before the writer: `{TASK_DIR / 'git-before-01.txt'}`", text)
+        self.assertIn(f"Target state after the writer: `{TASK_DIR / 'git-after-02.txt'}`", text)
+        self.assertIn(f"`{TASK_DIR / 'git-before-02.txt'}`", text)
+        self.assertIn(f"Writer handoff: `{KIT_ROOT / sub.handoff}`", text)
+
+
 if __name__ == "__main__":
     unittest.main()
