@@ -185,7 +185,7 @@ Sources checked 2026-09-11: [Claude CLI reference](https://code.claude.com/docs/
 - Relevant behavior/regression checks ran with discovered repository commands; skipped checks and residual risks are explicit.
 - Risk-based independent review is complete or explicitly pending with its limitations; blocking findings mean the task is not complete.
 - Norm references identify actual available evidence. Unverified kit summaries or IDs alone cannot establish official conformity.
-- Commits, published MRs, Redmine writes, deployments and live-data operations remain outside local delivery without corresponding authorization.
+- Commits, published MRs, Redmine writes, deployments and live-data operations remain outside local delivery without corresponding authorization. The `dev` environment database is not live data: starting applications and running checks against it is part of local delivery and preferred over a local Docker database.
 
 ## Evaluation cases
 

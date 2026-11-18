@@ -13,3 +13,5 @@ Inspect affected Java modules, framework/build, contracts, security, persistence
 - Consult affected items in [the endpoint checklist](templates/endpoint-checklist.md), without requiring a new checklist artifact or DTO.
 - Add regression/unit/integration checks appropriate to changed behavior and run relevant discovered project commands. Update API specs or rollout/migration documentation only when affected.
 - When copying a canonical component or adding versioned endpoints, pin the reference revision and map each affected route to its current counterpart. Check method/path, DTO shape, response and error envelopes, exception-handler scope, audit events, generated API schema, and regression of existing routes where each applies. Record deliberate deviations against the task contract rather than silently carrying a reference project's convention across.
+
+For TAG implementation or review in Java/Spring APIs, use [api-tag-implementation](../api-tag-implementation/SKILL.md) for copy/subtree integration and validation of versioned contracts.

@@ -20,3 +20,5 @@ O resumo histórico vinculado abaixo tem atualidade **não verificada**. Seus id
 - Testar comportamento alterado, erros, autorização e compatibilidade; atualizar OpenAPI e consumidores somente quando afetados. Sanitizar respostas e logs.
 
 Consultar [referência histórica](references/historical-summary.md) somente ao avaliar uma convenção corporativa de HTTP, tags ou health check. Não aplicar seus valores como defaults universais.
+
+Para implementar ou revisar TAG em APIs Java/Spring, usar [api-tag-implementation](../api-tag-implementation/SKILL.md), incluindo integração por cópia ou subtree e validação dos contratos versionados.

@@ -223,6 +223,15 @@ Skills são procedimentos carregados sob demanda. No Claude Code, Marina e os es
   Expor GET /v1/unidades/{id}/leitos com paginação. Manter o envelope de resposta atual e as regras de autorização do módulo.
   ```
 
+#### `api-tag-implementation`
+
+- **O que faz:** orienta implementação TAG em APIs Java/Spring, com integração por cópia ou subtree, controllers versionados e validação de compatibilidade.
+- **Quando usar:** introdução ou revisão de `TagFactory`, `RespostaComTag` e `TagExceptionHandler`, conforme o contrato confirmado do projeto. Convenções corporativas dependem de evidência aplicável.
+- **Exemplo:**
+  ```text
+  $api-tag-implementation Implementar TAG nas operações da API, seguindo o guia vigente e preservando os endpoints atuais; conferir DTOs, handler e SyncEvent.
+  ```
+
 ### Dados e ETL
 
 #### `etl-pipeline`
